@@ -4,6 +4,16 @@ Tous les changements majeurs apportés à l'architecture de la plateforme, au sc
 
 ---
 
+## [1.1.0] - 2026-07-13
+### Ajouté
+* **Modularisation Complète du module Chambres (`Rooms.tsx`)** :
+  * Migration d'un composant monolithique vers une structure de composants réutilisables et extensibles : `RoomFilters.tsx`, `RoomCard.tsx`, `RoomTable.tsx`, `RoomForm.tsx` et `RoomDetailsDrawer.tsx`.
+  * Implémentation du modèle de calcul en temps réel des statuts de chambres (`roomUtils.ts`) fondé sur les corrélations d'occupation courante (réservations en séjour actif), entretien (housekeeping) et pannes (maintenance tickets).
+  * Prise en charge native du modèle **multi-tarifs** de l'Hôtel Brunch (Standard, Week-end, Haute Saison, Corporate, OTA) avec calculs automatiques des coefficients de pré-remplissage.
+* **Résolution de la Dette Technique et Rétrocompatibilité** :
+  * Intégration de champs optionnels de rétrocompatibilité dans `IRoom` (`current_status`, `housekeeping_status`, `maintenance_status`) pour garantir la robustesse des autres écrans de l'application (Reception, Reservations, etc.).
+  * Ajout d'une gestion défensive de la valeur nulle/indéfinie dans `RoomStatusBadge.tsx` pour parer à toute anomalie d'état au runtime (évitant le plantage de type `TypeError: can't access property "toLowerCase", status is undefined`).
+
 ## [1.0.0] - 2026-07-13
 ### Ajouté
 * Figeage officiel de l'architecture professionnelle multi-tenant **Nucleus PMS Core**.

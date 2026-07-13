@@ -20,6 +20,19 @@ export interface IGuest {
   blacklist: boolean;
 }
 
+export interface IAmenity {
+  id: string;
+  name: string;
+  icon: string; // Lucide icon name, e.g. 'Wifi', 'Wind', etc.
+  category: string; // 'Confort' | 'Technologie' | 'Salle de bain' | 'Vue' | 'Autre'
+  active: boolean;
+}
+
+export interface IRoomTariff {
+  rate_type: 'normal' | 'weekend' | 'season' | 'corporate' | 'ota';
+  amount: number;
+}
+
 export interface IRoomCategory {
   id: string;
   name: string;
@@ -27,9 +40,10 @@ export interface IRoomCategory {
   default_price: number;
   max_capacity: number;
   color: string;
+  icon?: string; // e.g. 'Bed', 'Flame', 'Sparkles', etc.
 }
 
-export type TRoomStatus = 'Libre' | 'Réservée' | 'Occupée' | 'À nettoyer' | 'Inspection' | 'Maintenance' | 'Hors service';
+export type TRoomStatus = 'Disponible' | 'Occupée' | 'Réservée' | 'Nettoyage' | 'Maintenance' | 'Hors service' | 'Libre' | 'À nettoyer';
 export type THousekeepingStatus = 'À nettoyer' | 'En cours' | 'Contrôle' | 'Disponible';
 export type TMaintenanceStatus = 'Signalé' | 'Assigné' | 'En cours' | 'Résolu' | 'Clôturé';
 
@@ -42,10 +56,18 @@ export interface IRoom {
   bed_type: string;
   area: number;
   base_price: number;
-  current_status: TRoomStatus;
-  housekeeping_status: THousekeepingStatus;
-  maintenance_status: TMaintenanceStatus;
+  amenities: string[]; // references IAmenity.id
   notes?: string;
+  active: boolean;
+  prices: IRoomTariff[];
+  created_at: string;
+  updated_at: string;
+  created_by: string;
+  updated_by: string;
+  // Retro-compatibility fields for legacy page compilations
+  current_status?: TRoomStatus;
+  housekeeping_status?: THousekeepingStatus;
+  maintenance_status?: TMaintenanceStatus;
 }
 
 export type TReservationStatus = 'Brouillon' | 'En attente' | 'Confirmée' | 'En séjour' | 'Terminée' | 'Annulée' | 'No Show';

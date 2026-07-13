@@ -7,6 +7,7 @@ import {
   IGuest,
   IRoomCategory,
   IRoom,
+  IAmenity,
   IReservation,
   IInvoice,
   IInvoiceItem,
@@ -20,25 +21,221 @@ import {
   IRestaurantOrderItem
 } from './types';
 
+// Amenities
+export const mockAmenities: IAmenity[] = [
+  { id: 'amen-wifi', name: 'Wi-Fi Haute Vitesse', icon: 'Wifi', category: 'Technologie', active: true },
+  { id: 'amen-ac', name: 'Climatisation', icon: 'Wind', category: 'Confort', active: true },
+  { id: 'amen-tv', name: 'TV Écran Plat', icon: 'Tv', category: 'Technologie', active: true },
+  { id: 'amen-minibar', name: 'Mini-bar', icon: 'Coffee', category: 'Confort', active: true },
+  { id: 'amen-bath', name: 'Baignoire', icon: 'Bath', category: 'Salle de bain', active: true },
+  { id: 'amen-garden', name: 'Vue Jardin', icon: 'Trees', category: 'Vue', active: true },
+  { id: 'amen-desk', name: 'Bureau de travail', icon: 'Briefcase', category: 'Confort', active: true },
+  { id: 'amen-pool', name: 'Accès Piscine', icon: 'Waves', category: 'Services', active: true }
+];
+
 // Categories
 export const mockRoomCategories: IRoomCategory[] = [
-  { id: 'cat-std', name: 'Standard', description: 'Chambre confortable avec lit double, climatisation, bureau et TV.', default_price: 35000, max_capacity: 2, color: 'emerald' },
-  { id: 'cat-twin', name: 'Standard Twin', description: 'Chambre avec deux lits simples, idéale pour collègues ou amis.', default_price: 40000, max_capacity: 2, color: 'blue' },
-  { id: 'cat-dlx', name: 'Deluxe', description: 'Espace spacieux, lit King size, mini-bar, grand écran et vue sur jardin.', default_price: 55000, max_capacity: 2, color: 'indigo' },
-  { id: 'cat-ste', name: 'Suite Brunch', description: 'Le luxe absolu : salon privé, baignoire, lit King size et petit déjeuner brunch inclus.', default_price: 95000, max_capacity: 3, color: 'amber' },
-  { id: 'cat-fam', name: 'Familiale', description: 'Suite avec deux chambres séparées, idéale pour les séjours en famille.', default_price: 75000, max_capacity: 5, color: 'rose' }
+  { id: 'cat-std', name: 'Standard', description: 'Chambre confortable avec lit double, climatisation, bureau et TV.', default_price: 35000, max_capacity: 2, color: 'emerald', icon: 'Bed' },
+  { id: 'cat-twin', name: 'Standard Twin', description: 'Chambre avec deux lits simples, idéale pour collègues ou amis.', default_price: 40000, max_capacity: 2, color: 'blue', icon: 'BedDouble' },
+  { id: 'cat-dlx', name: 'Deluxe', description: 'Espace spacieux, lit King size, mini-bar, grand écran et vue sur jardin.', default_price: 55000, max_capacity: 2, color: 'indigo', icon: 'Sparkles' },
+  { id: 'cat-ste', name: 'Suite Brunch', description: 'Le luxe absolu : salon privé, baignoire, lit King size et petit déjeuner brunch inclus.', default_price: 95000, max_capacity: 3, color: 'amber', icon: 'Crown' },
+  { id: 'cat-fam', name: 'Familiale', description: 'Suite avec deux chambres séparées, idéale pour les séjours en famille.', default_price: 75000, max_capacity: 5, color: 'rose', icon: 'Users' }
 ];
 
 // Rooms
 export const mockRooms: IRoom[] = [
-  { id: 'room-101', room_number: '101', category_id: 'cat-std', floor: '1er Étage', capacity: 2, bed_type: 'Lit Double', area: 22, base_price: 35000, current_status: 'Occupée', housekeeping_status: 'Disponible', maintenance_status: 'Signalé' },
-  { id: 'room-102', room_number: '102', category_id: 'cat-std', floor: '1er Étage', capacity: 2, bed_type: 'Lit Double', area: 22, base_price: 35000, current_status: 'Libre', housekeeping_status: 'Disponible', maintenance_status: 'Signalé' },
-  { id: 'room-103', room_number: '103', category_id: 'cat-twin', floor: '1er Étage', capacity: 2, bed_type: '2 Lits Simples', area: 25, base_price: 40000, current_status: 'Libre', housekeeping_status: 'À nettoyer', maintenance_status: 'Signalé' },
-  { id: 'room-104', room_number: '104', category_id: 'cat-dlx', floor: '1er Étage', capacity: 2, bed_type: 'Lit King Size', area: 32, base_price: 55000, current_status: 'Occupée', housekeeping_status: 'Disponible', maintenance_status: 'Signalé' },
-  { id: 'room-201', room_number: '201', category_id: 'cat-dlx', floor: '2ème Étage', capacity: 2, bed_type: 'Lit King Size', area: 32, base_price: 55000, current_status: 'À nettoyer', housekeeping_status: 'En cours', maintenance_status: 'Signalé' },
-  { id: 'room-202', room_number: '202', category_id: 'cat-ste', floor: '2ème Étage', capacity: 3, bed_type: 'Lit King Size + Canapé', area: 45, base_price: 95000, current_status: 'Occupée', housekeeping_status: 'Disponible', maintenance_status: 'Signalé' },
-  { id: 'room-203', room_number: '203', category_id: 'cat-ste', floor: '2ème Étage', capacity: 3, bed_type: 'Lit King Size + Canapé', area: 45, base_price: 95000, current_status: 'Maintenance', housekeeping_status: 'Disponible', maintenance_status: 'En cours' },
-  { id: 'room-204', room_number: '204', category_id: 'cat-fam', floor: '2ème Étage', capacity: 5, bed_type: '1 King Size + 2 Simples', area: 55, base_price: 75000, current_status: 'Libre', housekeeping_status: 'Disponible', maintenance_status: 'Signalé' }
+  {
+    id: 'room-101',
+    room_number: '101',
+    category_id: 'cat-std',
+    floor: '1er Étage',
+    capacity: 2,
+    bed_type: 'Lit Double',
+    area: 22,
+    base_price: 35000,
+    amenities: ['amen-wifi', 'amen-ac', 'amen-tv', 'amen-desk'],
+    notes: 'Chambre proche de l\'ascenseur. Préférée des voyageurs d\'affaires.',
+    active: true,
+    prices: [
+      { rate_type: 'normal', amount: 35000 },
+      { rate_type: 'weekend', amount: 38000 },
+      { rate_type: 'season', amount: 45000 },
+      { rate_type: 'corporate', amount: 32000 },
+      { rate_type: 'ota', amount: 40000 }
+    ],
+    created_at: '2026-01-10T12:00:00Z',
+    updated_at: '2026-06-15T15:30:00Z',
+    created_by: 'Koffi (Réception)',
+    updated_by: 'Koffi (Réception)'
+  },
+  {
+    id: 'room-102',
+    room_number: '102',
+    category_id: 'cat-std',
+    floor: '1er Étage',
+    capacity: 2,
+    bed_type: 'Lit Double',
+    area: 22,
+    base_price: 35000,
+    amenities: ['amen-wifi', 'amen-ac', 'amen-tv', 'amen-desk'],
+    notes: 'Très calme, donne sur la cour intérieure.',
+    active: true,
+    prices: [
+      { rate_type: 'normal', amount: 35000 },
+      { rate_type: 'weekend', amount: 38000 },
+      { rate_type: 'season', amount: 45000 },
+      { rate_type: 'corporate', amount: 32000 },
+      { rate_type: 'ota', amount: 40000 }
+    ],
+    created_at: '2026-01-10T12:00:00Z',
+    updated_at: '2026-01-10T12:00:00Z',
+    created_by: 'Koffi (Réception)',
+    updated_by: 'Koffi (Réception)'
+  },
+  {
+    id: 'room-103',
+    room_number: '103',
+    category_id: 'cat-twin',
+    floor: '1er Étage',
+    capacity: 2,
+    bed_type: '2 Lits Simples',
+    area: 25,
+    base_price: 40000,
+    amenities: ['amen-wifi', 'amen-ac', 'amen-tv', 'amen-desk'],
+    notes: 'Idéal pour le co-sharing professionnel.',
+    active: true,
+    prices: [
+      { rate_type: 'normal', amount: 40000 },
+      { rate_type: 'weekend', amount: 44000 },
+      { rate_type: 'season', amount: 50000 },
+      { rate_type: 'corporate', amount: 36000 },
+      { rate_type: 'ota', amount: 46000 }
+    ],
+    created_at: '2026-01-12T10:30:00Z',
+    updated_at: '2026-04-18T09:15:00Z',
+    created_by: 'Koffi (Réception)',
+    updated_by: 'Amandine (Admin)'
+  },
+  {
+    id: 'room-104',
+    room_number: '104',
+    category_id: 'cat-dlx',
+    floor: '1er Étage',
+    capacity: 2,
+    bed_type: 'Lit King Size',
+    area: 32,
+    base_price: 55000,
+    amenities: ['amen-wifi', 'amen-ac', 'amen-tv', 'amen-minibar', 'amen-garden', 'amen-desk', 'amen-pool'],
+    notes: 'Excellente luminosité le matin. Vue splendide sur le jardin.',
+    active: true,
+    prices: [
+      { rate_type: 'normal', amount: 55000 },
+      { rate_type: 'weekend', amount: 60000 },
+      { rate_type: 'season', amount: 70000 },
+      { rate_type: 'corporate', amount: 50000 },
+      { rate_type: 'ota', amount: 63000 }
+    ],
+    created_at: '2026-01-15T14:00:00Z',
+    updated_at: '2026-01-15T14:00:00Z',
+    created_by: 'Amandine (Admin)',
+    updated_by: 'Amandine (Admin)'
+  },
+  {
+    id: 'room-201',
+    room_number: '201',
+    category_id: 'cat-dlx',
+    floor: '2ème Étage',
+    capacity: 2,
+    bed_type: 'Lit King Size',
+    area: 32,
+    base_price: 55000,
+    amenities: ['amen-wifi', 'amen-ac', 'amen-tv', 'amen-minibar', 'amen-garden', 'amen-desk', 'amen-pool'],
+    notes: 'Possède un petit balcon privé aménagé.',
+    active: true,
+    prices: [
+      { rate_type: 'normal', amount: 55000 },
+      { rate_type: 'weekend', amount: 60000 },
+      { rate_type: 'season', amount: 70000 },
+      { rate_type: 'corporate', amount: 50000 },
+      { rate_type: 'ota', amount: 63000 }
+    ],
+    created_at: '2026-01-15T14:30:00Z',
+    updated_at: '2026-05-12T11:00:00Z',
+    created_by: 'Amandine (Admin)',
+    updated_by: 'Koffi (Réception)'
+  },
+  {
+    id: 'room-202',
+    room_number: '202',
+    category_id: 'cat-ste',
+    floor: '2ème Étage',
+    capacity: 3,
+    bed_type: 'Lit King Size + Canapé',
+    area: 45,
+    base_price: 95000,
+    amenities: ['amen-wifi', 'amen-ac', 'amen-tv', 'amen-minibar', 'amen-bath', 'amen-garden', 'amen-desk', 'amen-pool'],
+    notes: 'Bouteille de vin de palme de bienvenue. Suite de prestige.',
+    active: true,
+    prices: [
+      { rate_type: 'normal', amount: 95000 },
+      { rate_type: 'weekend', amount: 105000 },
+      { rate_type: 'season', amount: 120000 },
+      { rate_type: 'corporate', amount: 85000 },
+      { rate_type: 'ota', amount: 110000 }
+    ],
+    created_at: '2026-01-20T09:00:00Z',
+    updated_at: '2026-01-20T09:00:00Z',
+    created_by: 'Amandine (Admin)',
+    updated_by: 'Amandine (Admin)'
+  },
+  {
+    id: 'room-203',
+    room_number: '203',
+    category_id: 'cat-ste',
+    floor: '2ème Étage',
+    capacity: 3,
+    bed_type: 'Lit King Size + Canapé',
+    area: 45,
+    base_price: 95000,
+    amenities: ['amen-wifi', 'amen-ac', 'amen-tv', 'amen-minibar', 'amen-bath', 'amen-garden', 'amen-desk', 'amen-pool'],
+    notes: 'Actuellement en révision technique périodique.',
+    active: true,
+    prices: [
+      { rate_type: 'normal', amount: 95000 },
+      { rate_type: 'weekend', amount: 105000 },
+      { rate_type: 'season', amount: 120000 },
+      { rate_type: 'corporate', amount: 85000 },
+      { rate_type: 'ota', amount: 110000 }
+    ],
+    created_at: '2026-01-20T09:30:00Z',
+    updated_at: '2026-07-11T16:00:00Z',
+    created_by: 'Amandine (Admin)',
+    updated_by: 'Abdoulaye (Technicien)'
+  },
+  {
+    id: 'room-204',
+    room_number: '204',
+    category_id: 'cat-fam',
+    floor: '2ème Étage',
+    capacity: 5,
+    bed_type: '1 King Size + 2 Simples',
+    area: 55,
+    base_price: 75000,
+    amenities: ['amen-wifi', 'amen-ac', 'amen-tv', 'amen-minibar', 'amen-bath', 'amen-desk'],
+    notes: 'Deux salles d\'eau séparées. Excellente pour les familles nombreuses.',
+    active: true,
+    prices: [
+      { rate_type: 'normal', amount: 75000 },
+      { rate_type: 'weekend', amount: 82000 },
+      { rate_type: 'season', amount: 95000 },
+      { rate_type: 'corporate', amount: 68000 },
+      { rate_type: 'ota', amount: 85000 }
+    ],
+    created_at: '2026-01-25T11:00:00Z',
+    updated_at: '2026-01-25T11:00:00Z',
+    created_by: 'Amandine (Admin)',
+    updated_by: 'Amandine (Admin)'
+  }
 ];
 
 // Guests
