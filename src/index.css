@@ -1,0 +1,61 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Evreghen Command Center Design Language Tokens */
+  --color-background: #fcfaf7;
+  --color-on-background: #423d38;
+  --color-surface: #f3f4f6;
+  --color-surface-soft: #edebe9;
+  --color-surface-elevated: #ffffff;
+  --color-on-surface: #423d38;
+  --color-on-surface-muted: #797067;
+  --color-outline: #e3e0dd;
+  --color-outline-strong: #d1d5dc;
+
+  --color-brand-orange: #fe6e00;
+  --color-brand-orange-hover: #ff6b00;
+  --color-brand-orange-warm: #ffb74d;
+  --color-brand-orange-focus: #f97015;
+  --color-on-brand-orange: #ffffff;
+
+  --color-shell-base: #000000;
+  --color-on-shell: #ffffff;
+  --color-shell-border: rgba(255, 255, 255, 0.1);
+
+  --color-success: #00c758;
+  --color-warning: #edb200;
+  --color-danger: #fb2c36;
+  --color-info: #3080ff;
+
+  /* Theme-compatible sidebar & active controls */
+  --color-sidebar-bg: rgba(0, 0, 0, 0.70);
+  --color-sidebar-border: rgba(255, 255, 255, 0.1);
+  --color-sidebar-text: rgba(255, 255, 255, 0.70);
+  --color-sidebar-text-active: #ffffff;
+}
+
+@layer base {
+  body {
+    @apply font-sans text-on-background bg-background antialiased;
+  }
+}
+
+/* Custom scrollbars for high-density tables */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #e3e0dd;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #d1d5dc;
+}
