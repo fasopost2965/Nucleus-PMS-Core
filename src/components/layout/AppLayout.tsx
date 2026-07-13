@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -52,6 +52,23 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
   const location = useLocation();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [hotelName, setHotelName] = useState(() => localStorage.getItem('hotelName') || 'Brunch Resto-Bar Vip');
+  const [hotelLogo, setHotelLogo] = useState<string | null>(() => localStorage.getItem('hotelLogo'));
+
+  useEffect(() => {
+    const handleConfigChange = () => {
+      setHotelName(localStorage.getItem('hotelName') || 'Brunch Resto-Bar Vip');
+      setHotelLogo(localStorage.getItem('hotelLogo'));
+    };
+
+    window.addEventListener('hotel-config-changed', handleConfigChange);
+    window.addEventListener('storage', handleConfigChange);
+
+    return () => {
+      window.removeEventListener('hotel-config-changed', handleConfigChange);
+      window.removeEventListener('storage', handleConfigChange);
+    };
+  }, []);
   const [sidebarPinned, setSidebarPinned] = useState<boolean>(() => {
     const stored = localStorage.getItem('pms_sidebar_pinned');
     return stored !== null ? stored === 'true' : true;
@@ -106,11 +123,27 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
         {/* BRAND HEADER */}
         <div className="h-16 flex items-center justify-between px-6 border-b border-white/10 bg-black/40">
           <div className="flex items-center space-x-3">
-            <div className="w-9 h-9 rounded-lg bg-brand-orange flex items-center justify-center font-bold text-white text-lg shadow-lg shadow-brand-orange/20">
-              B
-            </div>
-            <div>
-              <h1 className="text-white font-bold text-sm tracking-wide uppercase leading-none">Brunch Bouaké</h1>
+            {hotelLogo === 'PRESET_VIP_LOGO' ? (
+              <div className="w-9 h-9 rounded-lg bg-slate-900 border border-brand-orange/40 flex items-center justify-center font-black text-brand-orange text-lg shadow-lg shadow-brand-orange/10 relative">
+                B
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-brand-orange animate-pulse"></span>
+              </div>
+            ) : hotelLogo ? (
+              <img 
+                src={hotelLogo} 
+                alt="Logo" 
+                className="w-9 h-9 rounded-lg object-contain bg-white p-0.5 shadow-md border border-white/10" 
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="w-9 h-9 rounded-lg bg-brand-orange flex items-center justify-center font-bold text-white text-lg shadow-lg shadow-brand-orange/20">
+                {hotelName ? hotelName[0].toUpperCase() : 'B'}
+              </div>
+            )}
+            <div className="overflow-hidden">
+              <h1 className="text-white font-bold text-sm tracking-wide uppercase leading-none truncate max-w-[130px]" title={hotelName}>
+                {hotelName}
+              </h1>
               <span className="text-[10px] text-brand-orange font-semibold tracking-wider uppercase">Command Center</span>
             </div>
           </div>

@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useLocation } from 'react-router-dom';
 import { CalendarDays, Plus, Search, Filter, Trash2, CheckSquare, XCircle, Users, Bed, Coins, ArrowRight, X } from 'lucide-react';
 import { PageHeader, Badge, AlertBanner } from '../components/ui/pms-ui';
@@ -260,8 +261,8 @@ export default function Reservations() {
 
         {/* STEPPED CREATION DIALOG OVERLAY */}
         <AnimatePresence>
-          {showCreateModal && (
-            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          {showCreateModal && createPortal(
+            <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
               <motion.div 
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -607,7 +608,8 @@ export default function Reservations() {
                   </AnimatePresence>
                 </form>
               </motion.div>
-            </div>
+            </div>,
+            document.body
           )}
         </AnimatePresence>
 

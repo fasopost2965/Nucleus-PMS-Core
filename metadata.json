@@ -1,6 +1,6 @@
 {
   "name": "Brunch Bouaké PMS",
-  "description": "SaaS Property Management System for Brunch Bouaké Hotel & Restaurant",
+  "description": "Professional SaaS Property Management System (PMS) platform, with Brunch Bouaké as its premier instance.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
