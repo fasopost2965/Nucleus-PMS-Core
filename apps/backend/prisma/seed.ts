@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
 
@@ -63,6 +64,7 @@ async function main() {
   console.log(`Role ${adminRole.name} created.`);
 
   // 4. Créer le premier Utilisateur Administrateur (Mot de passe: "admin123")
+  const passwordHash = await bcrypt.hash('admin123', 10);
   const adminUser = await prisma.user.upsert({
     where: { email: 'admin@brunchbouake.local' },
     update: {},
@@ -70,7 +72,7 @@ async function main() {
       email: 'admin@brunchbouake.local',
       firstName: 'Admin',
       lastName: 'Brunch',
-      passwordHash: '$2b$10$EP0/0O4CqL7xP.2nI61EPeP66V0rD0sK0qJkI1z0/0M/1Q.7W1XWq', // bcrypt hash pour 'admin123'
+      passwordHash,
       roleId: adminRole.id,
     },
   });
