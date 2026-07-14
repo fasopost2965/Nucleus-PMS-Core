@@ -91,6 +91,13 @@ export const api = {
   createReservation: (data: any) => request('/reservations', { method: 'POST', body: JSON.stringify(data) }),
   checkInReservation: (id: string) => request(`/reservations/${id}/check-in`, { method: 'POST' }),
 
+  // Housekeeping API
+  getHousekeepingTasks: async (): Promise<any[]> => {
+    const res = await request('/housekeeping/tasks');
+    return res.tasks || [];
+  },
+  updateHousekeepingTask: (id: string, data: any) => request(`/housekeeping/tasks/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
   // HRMS API
   getEmployees: async (): Promise<any[]> => {
     const res = await request('/hrms/employees');

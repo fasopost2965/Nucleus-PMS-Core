@@ -3,11 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Sparkles, CheckSquare, Search, Filter, RefreshCw, CheckCircle2, User, HelpCircle } from 'lucide-react';
 import { PageHeader, Badge, AlertBanner } from '../components/ui/pms-ui';
 import { mockHousekeepingTasks, mockRooms, mockStockItems } from '../mockData';
-import { IHousekeepingTask, THousekeepingStatus } from '../types';
+import { IHousekeepingTask, IRoom, THousekeepingStatus } from '../types';
+import { api } from '../utils/api';
 import { logManualStockMovement } from '../stockService';
 
 export default function Housekeeping() {
@@ -19,7 +20,7 @@ export default function Housekeeping() {
     return mockHousekeepingTasks;
   });
 
-  const [rooms, setRooms] = useState(() => {
+  const [rooms, setRooms] = useState<IRoom[]>(() => {
     const stored = localStorage.getItem('pms_rooms');
     if (stored) {
       try { return JSON.parse(stored); } catch (e) {}
@@ -27,7 +28,37 @@ export default function Housekeeping() {
     return mockRooms;
   });
 
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState('');
+
+  useEffect(() => {
+    const loadHousekeepingData = async () => {
+      setLoading(true);
+      setLoadError(null);
+
+      try {
+        const housekeepingData = await api.getHousekeepingTasks();
+        if (Array.isArray(housekeepingData)) {
+          setTasks(housekeepingData);
+          localStorage.setItem('pms_housekeeping_tasks', JSON.stringify(housekeepingData));
+        }
+
+        const roomData = await api.getRooms();
+        if (Array.isArray(roomData) && roomData.length > 0) {
+          setRooms(roomData);
+          localStorage.setItem('pms_rooms', JSON.stringify(roomData));
+        }
+      } catch (error) {
+        console.error('Chargement Housekeeping API échoué:', error);
+        setLoadError('Impossible de charger les informations Housekeeping. Mode dégradé activé.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadHousekeepingData();
+  }, []);
 
   const triggerLinenMovement = (roomId: string) => {
     const targetRoom = rooms.find(r => r.id === roomId);
@@ -113,23 +144,51 @@ export default function Housekeeping() {
     setTimeout(() => setSuccessMsg(''), 6000);
   };
 
-  const updateTaskStatus = (id: string, newStatus: THousekeepingStatus) => {
-    const updatedTasks = tasks.map(t => {
+  const updateTaskStatus = async (id: string, newStatus: THousekeepingStatus) => {
+    const now = new Date().toISOString().replace('T', ' ').substring(0, 16);
+    const updatedTasks = tasks.map((t) => {
       if (t.id === id) {
         return {
           ...t,
           status: newStatus,
-          completed_time: newStatus === 'Disponible' ? new Date().toISOString().replace('T', ' ').substring(0, 16) : t.completed_time
+          completed_time: newStatus === 'Disponible' ? now : t.completed_time
         };
       }
       return t;
     });
+
     setTasks(updatedTasks);
     localStorage.setItem('pms_housekeeping_tasks', JSON.stringify(updatedTasks));
+
+    try {
+      await api.updateHousekeepingTask(id, {
+        status: newStatus,
+        completedTime: newStatus === 'Disponible' ? now : undefined
+      });
+    } catch (error) {
+      console.error('Erreur de mise à jour de tâche Housekeeping :', error);
+    }
+
+    if (newStatus === 'Disponible') {
+      const task = tasks.find((t) => t.id === id);
+      if (task) {
+        const updatedRooms = rooms.map((r) =>
+          r.id === task.room_id ? { ...r, housekeeping_status: 'Disponible' } : r
+        );
+        setRooms(updatedRooms);
+        localStorage.setItem('pms_rooms', JSON.stringify(updatedRooms));
+
+        try {
+          await api.updateRoom(task.room_id, { housekeeping_status: 'Disponible' });
+        } catch (error) {
+          console.error('Erreur de mise à jour du statut de chambre :', error);
+        }
+      }
+    }
   };
 
   const getRoomNum = (roomId: string) => {
-    return rooms.find(r => r.id === roomId)?.room_number || '-';
+    return rooms.find((r) => r.id === roomId)?.room_number || '-';
   };
 
   return (
@@ -142,6 +201,9 @@ export default function Housekeeping() {
       <div className="p-6 lg:p-8 space-y-6 flex-1 overflow-y-auto">
         {successMsg && (
           <AlertBanner text={successMsg} type="success" />
+        )}
+        {loadError && (
+          <AlertBanner text={loadError} type="warning" />
         )}
 
         {/* SUMMARY PROGRESS BAR */}
