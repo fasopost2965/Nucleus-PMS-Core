@@ -1,0 +1,512 @@
+// ==========================================
+// BRUNCH BOUAKÉ PMS - PRISMA SCHEMA
+// ==========================================
+// 
+// CONVENTIONS DE NOMMAGE :
+// - Modèles (PascalCase) : ex. User, Role
+// - Tables (snake_case, au pluriel) : ex. users, roles (via @@map)
+// - Clés primaires : id (Int, @id, @default(autoincrement())) ou UUID
+// - Clés étrangères (camelCase) : ex. roleId, userId
+// - Index : @@index([field])
+// - Contraintes uniques : @@unique([field])
+// - Relations : camelCase, au pluriel pour One-to-Many (ex. roles), singulier pour One-to-One
+// - Soft Delete : deletedAt (DateTime?), deletedBy (Int?) sur les entités importantes
+// ==========================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ------------------------------------------
+// 1. UTILISATEURS & ACCÈS (RBAC)
+// ------------------------------------------
+
+model User {
+  id           Int       @id @default(autoincrement())
+  email        String    @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  isActive     Boolean   @default(true)
+  
+  roleId       Int
+  role         Role      @relation(fields: [roleId], references: [id])
+  
+  auditLogs    AuditLog[] @relation("UserAuditLogs")
+  maintenanceTickets MaintenanceTicket[]
+  inventoryMovements InventoryMovement[]
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+  deletedBy    Int?
+
+  @@map("users")
+  @@index([email])
+}
+
+model Role {
+  id          Int          @id @default(autoincrement())
+  name        String       @unique // ex: 'ADMIN', 'RECEPTIONIST', 'MANAGER'
+  description String?
+  
+  users       User[]
+  permissions Permission[] @relation("RolePermissions")
+
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@map("roles")
+}
+
+model Permission {
+  id          Int      @id @default(autoincrement())
+  action      String   // ex: 'create', 'read', 'update', 'delete'
+  subject     String   // ex: 'reservation', 'room', 'settings'
+  description String?
+
+  roles       Role[]   @relation("RolePermissions")
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("permissions")
+  @@unique([action, subject])
+}
+
+// ------------------------------------------
+// 2. AUDIT LOG
+// ------------------------------------------
+
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  action     String   // ex: 'RESERVATION_CREATED', 'PAYMENT_PROCESSED'
+  entityType String   // ex: 'Reservation', 'Payment'
+  entityId   Int
+  details    Json?    // Snapshot des modifications
+  ipAddress  String?
+  
+  userId     Int
+  user       User     @relation("UserAuditLogs", fields: [userId], references: [id])
+
+  createdAt  DateTime @default(now())
+
+  @@map("audit_logs")
+  @@index([entityType, entityId])
+  @@index([userId])
+}
+
+// ------------------------------------------
+// 3. PARAMÈTRES & CONFIGURATION
+// ------------------------------------------
+
+model Hotel {
+  id            Int      @id @default(autoincrement())
+  name          String
+  email         String?
+  phone         String?
+  address       String?
+  city          String?
+  country       String?
+  taxId         String?  // Numéro IFU ou NINEA
+  
+  settings      Settings?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("hotels")
+}
+
+model Settings {
+  id                  Int      @id @default(autoincrement())
+  currency            String   @default("XOF")
+  timezone            String   @default("Africa/Abidjan")
+  vatRate             Decimal  @default(18.00) @db.Decimal(5, 2)
+  tourismTaxRate      Decimal  @default(1000.00) @db.Decimal(10, 2) // Par nuit, par personne
+  invoicePrefix       String   @default("FAC-")
+  
+  hotelId             Int      @unique
+  hotel               Hotel    @relation(fields: [hotelId], references: [id])
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@map("settings")
+}
+
+// ------------------------------------------
+// 4. MODULE CHAMBRES & INVENTAIRE
+// ------------------------------------------
+
+model RoomCategory {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique // ex: 'Standard', 'Suite'
+  description String?  @db.Text
+  basePrice   Decimal  @db.Decimal(10, 2)
+  capacity    Int      @default(2)
+
+  rooms       Room[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  deletedBy   Int?
+
+  @@map("room_categories")
+}
+
+enum RoomStatus {
+  AVAILABLE
+  OCCUPIED
+  RESERVED
+  MAINTENANCE
+}
+
+enum CleaningStatus {
+  DIRTY
+  CLEANING
+  CLEAN
+  INSPECTED
+}
+
+model Room {
+  id          Int          @id @default(autoincrement())
+  number         String       @unique
+  floor          String?
+  status         RoomStatus   @default(AVAILABLE)
+  cleaningStatus CleaningStatus @default(DIRTY)
+
+  categoryId  Int
+  category    RoomCategory @relation(fields: [categoryId], references: [id])
+
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  deletedAt   DateTime?
+  deletedBy   Int?
+
+  reservations     Reservation[]
+  maintenanceTickets MaintenanceTicket[]
+
+  @@map("rooms")
+  @@index([categoryId])
+  @@index([status])
+}
+
+// ------------------------------------------
+// 5. MODULE CLIENTS (CRM)
+// ------------------------------------------
+
+model Guest {
+  id               Int       @id @default(autoincrement())
+  firstName        String
+  lastName         String
+  email            String?
+  phone            String?
+  nationality      String?
+  identityDocument String?
+  preferences      String?   @db.Text
+
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+  deletedBy        Int?
+
+  reservations     Reservation[]
+
+  @@map("guests")
+  @@index([email])
+  @@index([phone])
+}
+
+// ------------------------------------------
+// 6. MODULE RÉSERVATIONS
+// ------------------------------------------
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  CHECKED_IN
+  CHECKED_OUT
+  CANCELLED
+  NO_SHOW
+}
+
+model Reservation {
+  id              Int               @id @default(autoincrement())
+  
+  guestId         Int
+  guest           Guest             @relation(fields: [guestId], references: [id])
+  
+  roomId          Int
+  room            Room              @relation(fields: [roomId], references: [id])
+  
+  checkInDate     DateTime          @db.Date
+  checkOutDate    DateTime          @db.Date
+  actualCheckIn   DateTime?
+  actualCheckOut  DateTime?
+  
+  status          ReservationStatus @default(PENDING)
+  adults          Int               @default(1)
+  children        Int               @default(0)
+  totalAmount     Decimal           @default(0.00) @db.Decimal(10, 2)
+
+  folio           Folio?
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  deletedAt       DateTime?
+  deletedBy       Int?
+
+  @@map("reservations")
+  @@index([guestId])
+  @@index([roomId])
+  @@index([status])
+}
+
+// ------------------------------------------
+// 7. MODULE FINANCE (Folio, Facturation, Paiements)
+// ------------------------------------------
+
+enum FolioStatus {
+  OPEN
+  CLOSED
+}
+
+model Folio {
+  id              Int          @id @default(autoincrement())
+  
+  reservationId   Int          @unique
+  reservation     Reservation  @relation(fields: [reservationId], references: [id])
+  
+  status          FolioStatus  @default(OPEN)
+  balance         Decimal      @default(0.00) @db.Decimal(10, 2) // Débits - Crédits
+
+  items           FolioItem[]
+  payments        Payment[]
+  invoice         Invoice?
+  restaurantOrders RestaurantOrder[]
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@map("folios")
+}
+
+model FolioItem {
+  id              Int          @id @default(autoincrement())
+  
+  folioId         Int
+  folio           Folio        @relation(fields: [folioId], references: [id])
+  
+  description     String
+  amount          Decimal      @db.Decimal(10, 2)
+  quantity        Int          @default(1)
+  date            DateTime     @default(now())
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@map("folio_items")
+  @@index([folioId])
+}
+
+enum PaymentMethod {
+  CASH
+  MOBILE_MONEY
+  CREDIT_CARD
+}
+
+model Payment {
+  id              Int           @id @default(autoincrement())
+  
+  folioId         Int
+  folio           Folio         @relation(fields: [folioId], references: [id])
+  
+  amount          Decimal       @db.Decimal(10, 2)
+  method          PaymentMethod
+  reference       String?       // ID Transaction externe
+  date            DateTime      @default(now())
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@map("payments")
+  @@index([folioId])
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  CANCELLED
+}
+
+model Invoice {
+  id              Int           @id @default(autoincrement())
+  
+  folioId         Int           @unique
+  folio           Folio         @relation(fields: [folioId], references: [id])
+  
+  invoiceNumber   String        @unique // Séq: FAC-YYYY-XXXX
+  issueDate       DateTime      @default(now())
+  totalAmount     Decimal       @db.Decimal(10, 2)
+  taxAmount       Decimal       @db.Decimal(10, 2)
+  status          InvoiceStatus @default(DRAFT)
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@map("invoices")
+}
+
+// ------------------------------------------
+// 8. MODULE MAINTENANCE
+// ------------------------------------------
+
+enum TicketSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+model MaintenanceTicket {
+  id          Int            @id @default(autoincrement())
+  title       String
+  description String         @db.Text
+  severity    TicketSeverity @default(LOW)
+  status      TicketStatus   @default(OPEN)
+  
+  roomId      Int
+  room        Room           @relation(fields: [roomId], references: [id])
+  
+  assignedTo  Int?
+  assignee    User?          @relation(fields: [assignedTo], references: [id])
+
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@map("maintenance_tickets")
+  @@index([roomId])
+}
+
+// ------------------------------------------
+// 9. MODULE RESTAURANT
+// ------------------------------------------
+
+model RestaurantItem {
+  id          Int      @id @default(autoincrement())
+  name        String
+  category    String   // ex: 'Boissons', 'Plats'
+  price       Decimal  @db.Decimal(10, 2)
+  isAvailable Boolean  @default(true)
+
+  orderItems  RestaurantOrderItem[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  deletedBy   Int?
+
+  @@map("restaurant_items")
+}
+
+enum RestaurantOrderStatus {
+  PENDING
+  PREPARING
+  SERVED
+  PAID
+  BILLED_TO_ROOM
+}
+
+model RestaurantOrder {
+  id          Int                   @id @default(autoincrement())
+  status      RestaurantOrderStatus @default(PENDING)
+  totalAmount Decimal               @default(0.00) @db.Decimal(10, 2)
+  
+  folioId     Int?
+  folio       Folio?                @relation(fields: [folioId], references: [id])
+
+  items       RestaurantOrderItem[]
+
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  @@map("restaurant_orders")
+  @@index([folioId])
+}
+
+model RestaurantOrderItem {
+  id          Int             @id @default(autoincrement())
+  orderId     Int
+  order       RestaurantOrder @relation(fields: [orderId], references: [id])
+  
+  itemId      Int
+  item        RestaurantItem  @relation(fields: [itemId], references: [id])
+  
+  quantity    Int             @default(1)
+  priceAtTime Decimal         @db.Decimal(10, 2)
+
+  createdAt   DateTime        @default(now())
+
+  @@map("restaurant_order_items")
+  @@index([orderId])
+}
+
+// ------------------------------------------
+// 10. MODULE STOCK (Inventaire)
+// ------------------------------------------
+
+model InventoryItem {
+  id                   Int      @id @default(autoincrement())
+  name                 String   @unique
+  quantity             Decimal  @default(0.00) @db.Decimal(10, 2)
+  unit                 String   // ex: 'kg', 'L', 'unit'
+  alertThreshold       Decimal  @default(0.00) @db.Decimal(10, 2)
+  averagePurchasePrice Decimal  @default(0.00) @db.Decimal(10, 2)
+
+  movements            InventoryMovement[]
+
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  deletedAt            DateTime?
+  deletedBy            Int?
+
+  @@map("inventory_items")
+}
+
+enum MovementType {
+  IN
+  OUT
+}
+
+model InventoryMovement {
+  id          Int           @id @default(autoincrement())
+  itemId      Int
+  item        InventoryItem @relation(fields: [itemId], references: [id])
+  
+  type        MovementType
+  quantity    Decimal       @db.Decimal(10, 2)
+  reason      String?       // ex: 'Achat', 'Consommation', 'Perte'
+  
+  userId      Int
+  user        User          @relation(fields: [userId], references: [id])
+
+  createdAt   DateTime      @default(now())
+
+  @@map("inventory_movements")
+  @@index([itemId])
+}
