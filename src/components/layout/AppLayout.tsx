@@ -93,6 +93,7 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
     { path: '/reservations', label: 'Réservations', icon: CalendarDays },
     { path: '/guests', label: 'Clients', icon: Users },
     { path: '/finance', label: 'Finance', icon: Coins },
+    { path: '/hrms', label: 'RH Enterprise', icon: Briefcase },
     { path: '/housekeeping', label: 'Housekeeping', icon: Sparkles },
     { path: '/maintenance', label: 'Maintenance', icon: Wrench },
     { path: '/restaurant', label: 'Restaurant', icon: Utensils },

@@ -235,3 +235,164 @@ export interface IStockMovement {
   type: string;
 }
 
+// ==========================================
+// MODULE HRMS (HUMAN RESOURCES) TYPES
+// ==========================================
+
+export interface IHRMSDepartment {
+  id: string;
+  hotel_id: number;
+  name: string;
+  code: string;
+  cost_center_code: string;
+  manager_id?: string; // hrms_employees.id
+  created_at: string;
+}
+
+export interface IHRMSJob {
+  id: string;
+  hotel_id: number;
+  department_id: string;
+  title: string;
+  description: string;
+  salary_min: number;
+  salary_max: number;
+  hourly_cost: number;
+  created_at: string;
+}
+
+export interface IHRMSTeam {
+  id: string;
+  hotel_id: number;
+  department_id: string;
+  name: string;
+  code: string;
+  supervisor_id?: string;
+  created_at: string;
+}
+
+export type TEmpType = 'FULL_TIME' | 'PART_TIME' | 'EXTRA' | 'SEASONAL' | 'INTERN' | 'CONSULTANT';
+export type TEmpStatus = 'active' | 'suspended' | 'on_leave' | 'terminated';
+
+export interface IHRMSEmployee {
+  id: string;
+  hotel_id: number;
+  user_id?: string;
+  department_id: string;
+  job_id: string;
+  team_id?: string;
+  employee_code: string;
+  employee_type: TEmpType;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+  gender: 'M' | 'F' | 'Autre';
+  date_of_birth: string;
+  address: string;
+  nationality: string;
+  emergency_contact_name: string;
+  emergency_contact_phone: string;
+  hire_date: string;
+  status: TEmpStatus;
+  cnps_number?: string;
+  
+  // Banking / Mobile Money
+  payment_method: 'bank_transfer' | 'mobile_money' | 'cash';
+  bank_name?: string;
+  bank_account_number?: string;
+  bank_swift?: string;
+  bank_iban?: string;
+  mobile_money_provider?: 'Orange Money' | 'MTN MoMo' | 'Wave';
+  mobile_money_number?: string;
+
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IHRMSContract {
+  id: string;
+  hotel_id: number;
+  employee_id: string;
+  contract_type: 'CDI' | 'CDD' | 'EXTRA' | 'INTERN' | 'CONSULTANT';
+  start_date: string;
+  end_date?: string;
+  trial_period_end?: string;
+  base_salary: number;
+  currency: string; // e.g., 'XOF' or 'EUR'
+  social_security_opt_in: boolean;
+  status: 'draft' | 'active' | 'expired' | 'superseded' | 'terminated';
+  signature_status: 'unsigned' | 'signed';
+  signed_at?: string;
+  signed_by?: string;
+  notes?: string;
+  created_at: string;
+}
+
+export interface IHRMSSkill {
+  id: string;
+  hotel_id: number;
+  name: string;
+  category: 'languages' | 'technical_haccp' | 'safety' | 'soft_skills';
+  description: string;
+}
+
+export interface IHRMSEmployeeSkill {
+  id: string;
+  hotel_id: number;
+  employee_id: string;
+  skill_id: string;
+  level: 'beginner' | 'intermediate' | 'advanced' | 'expert';
+  obtained_date?: string;
+  expiration_date?: string;
+}
+
+export interface IHRMSDocument {
+  id: string;
+  hotel_id: number;
+  employee_id: string;
+  document_type: 'id_card' | 'contract' | 'diploma' | 'payslip' | 'medical_certificate' | 'other';
+  file_name: string;
+  file_path: string;
+  file_size: number; // in bytes
+  mime_type: string;
+  uploaded_at: string;
+  uploaded_by: string;
+}
+
+export interface IHRMSOnboardingTask {
+  id: string;
+  hotel_id: number;
+  employee_id: string;
+  task_name: string;
+  assigned_to?: string;
+  status: 'pending' | 'completed';
+  completed_at?: string;
+  completed_by?: string;
+}
+
+export interface IHRMSBusinessEvent {
+  id: string;
+  hotel_id: number;
+  timestamp: string;
+  event_type: 'EmployeeCreated' | 'EmployeeUpdated' | 'ContractSigned' | 'PayrollGenerated' | 'SalaryAdvanceApproved' | 'EmployeeOffboarded' | 'LeaveApproved';
+  actor_name: string;
+  description: string;
+  payload?: any;
+}
+
+export interface IHRMSPayrollRule {
+  id: string;
+  hotel_id: number;
+  country_code: string; // e.g. 'CI'
+  default_currency: string;
+  cnps_employee_rate: number;
+  cnps_employer_rate: number;
+  cnps_ceiling: number;
+  salary_tax_rate: number;
+  national_contribution_rate: number;
+  effective_date: string;
+  active: boolean;
+}
+
+

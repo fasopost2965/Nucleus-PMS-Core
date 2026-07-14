@@ -34,7 +34,13 @@ export default function Rooms() {
     }
     return mockRooms;
   });
-  const [categories, setCategories] = useState<IRoomCategory[]>(mockRoomCategories);
+  const [categories, setCategories] = useState<IRoomCategory[]>(() => {
+    const stored = localStorage.getItem('pms_room_categories');
+    if (stored) {
+      try { return JSON.parse(stored); } catch (e) {}
+    }
+    return mockRoomCategories;
+  });
   const [amenities, setAmenities] = useState<IAmenity[]>(mockAmenities);
   const [reservations, setReservations] = useState(() => {
     const stored = localStorage.getItem('pms_reservations');

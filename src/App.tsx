@@ -24,6 +24,7 @@ import Inventory from './pages/Inventory';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import Admin from './pages/Admin';
+import HRMS from './pages/HRMS';
 
 interface IUser {
   name: string;
@@ -70,6 +71,7 @@ export default function App() {
           <Route path="/reports" element={<Reports />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/admin" element={<Admin />} />
+          <Route path="/hrms" element={<HRMS />} />
           
           {/* Catch-all fallback redirecting to dashboard */}
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
