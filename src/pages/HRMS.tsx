@@ -69,63 +69,77 @@ import {
   initialHRMSPayrollRules,
   CURRENT_HOTEL_ID
 } from '../mockHRMSData';
+import { api } from '../utils/api';
 
 export default function HRMS() {
   // --- Persistent Local State Engine ---
-  const [employees, setEmployees] = useState<IHRMSEmployee[]>(() => {
-    const stored = localStorage.getItem('hrms_employees');
-    return stored ? JSON.parse(stored) : initialHRMSEmployees;
-  });
+  const [employees, setEmployees] = useState<IHRMSEmployee[]>(initialHRMSEmployees);
+  const [departments, setDepartments] = useState<IHRMSDepartment[]>(initialHRMSDepartments);
+  const [jobs, setJobs] = useState<IHRMSJob[]>(initialHRMSJobs);
+  const [teams, setTeams] = useState<IHRMSTeam[]>(initialHRMSTeams);
+  const [contracts, setContracts] = useState<IHRMSContract[]>(initialHRMSContracts);
+  const [skills, setSkills] = useState<IHRMSSkill[]>(initialHRMSSkills);
+  const [employeeSkills, setEmployeeSkills] = useState<IHRMSEmployeeSkill[]>(initialHRMSEmployeeSkills);
+  const [documents, setDocuments] = useState<IHRMSDocument[]>(initialHRMSDocuments);
+  const [onboardingTasks, setOnboardingTasks] = useState<IHRMSOnboardingTask[]>(initialHRMSOnboardingTasks);
+  const [businessEvents, setBusinessEvents] = useState<IHRMSBusinessEvent[]>(initialHRMSEvents);
+  const [payrollRules, setPayrollRules] = useState<IHRMSPayrollRule[]>(initialHRMSPayrollRules);
 
-  const [departments, setDepartments] = useState<IHRMSDepartment[]>(() => {
-    const stored = localStorage.getItem('hrms_departments');
-    return stored ? JSON.parse(stored) : initialHRMSDepartments;
-  });
+  // Load all HRMS datasets from Express backend on mount
+  useEffect(() => {
+    const loadHRMSData = async () => {
+      try {
+        const loadedEmployees = await api.getEmployees();
+        if (loadedEmployees && loadedEmployees.length > 0) setEmployees(loadedEmployees);
+      } catch (e) { console.warn('Employees API fallback:', e); }
 
-  const [jobs, setJobs] = useState<IHRMSJob[]>(() => {
-    const stored = localStorage.getItem('hrms_jobs');
-    return stored ? JSON.parse(stored) : initialHRMSJobs;
-  });
+      try {
+        const loadedDepts = await api.getDepartments();
+        if (loadedDepts && loadedDepts.length > 0) setDepartments(loadedDepts);
+      } catch (e) { console.warn('Depts API fallback:', e); }
 
-  const [teams, setTeams] = useState<IHRMSTeam[]>(() => {
-    const stored = localStorage.getItem('hrms_teams');
-    return stored ? JSON.parse(stored) : initialHRMSTeams;
-  });
+      try {
+        const loadedJobs = await api.getJobs();
+        if (loadedJobs && loadedJobs.length > 0) setJobs(loadedJobs);
+      } catch (e) { console.warn('Jobs API fallback:', e); }
 
-  const [contracts, setContracts] = useState<IHRMSContract[]>(() => {
-    const stored = localStorage.getItem('hrms_contracts');
-    return stored ? JSON.parse(stored) : initialHRMSContracts;
-  });
+      try {
+        const loadedTeams = await api.getTeams();
+        if (loadedTeams && loadedTeams.length > 0) setTeams(loadedTeams);
+      } catch (e) { console.warn('Teams API fallback:', e); }
 
-  const [skills, setSkills] = useState<IHRMSSkill[]>(() => {
-    const stored = localStorage.getItem('hrms_skills');
-    return stored ? JSON.parse(stored) : initialHRMSSkills;
-  });
+      try {
+        const loadedContracts = await api.getContracts();
+        if (loadedContracts && loadedContracts.length > 0) setContracts(loadedContracts);
+      } catch (e) { console.warn('Contracts API fallback:', e); }
 
-  const [employeeSkills, setEmployeeSkills] = useState<IHRMSEmployeeSkill[]>(() => {
-    const stored = localStorage.getItem('hrms_employee_skills');
-    return stored ? JSON.parse(stored) : initialHRMSEmployeeSkills;
-  });
+      try {
+        const loadedTasks = await api.getOnboardingTasks();
+        if (loadedTasks && loadedTasks.length > 0) setOnboardingTasks(loadedTasks);
+      } catch (e) { console.warn('Onboarding Tasks API fallback:', e); }
 
-  const [documents, setDocuments] = useState<IHRMSDocument[]>(() => {
-    const stored = localStorage.getItem('hrms_documents');
-    return stored ? JSON.parse(stored) : initialHRMSDocuments;
-  });
+      try {
+        const loadedSkills = await api.getSkills();
+        if (loadedSkills && loadedSkills.length > 0) setSkills(loadedSkills);
+      } catch (e) { console.warn('Skills API fallback:', e); }
 
-  const [onboardingTasks, setOnboardingTasks] = useState<IHRMSOnboardingTask[]>(() => {
-    const stored = localStorage.getItem('hrms_onboarding_tasks');
-    return stored ? JSON.parse(stored) : initialHRMSOnboardingTasks;
-  });
+      try {
+        const loadedEmpSkills = await api.getEmployeeSkills();
+        if (loadedEmpSkills && loadedEmpSkills.length > 0) setEmployeeSkills(loadedEmpSkills);
+      } catch (e) { console.warn('Employee Skills API fallback:', e); }
 
-  const [businessEvents, setBusinessEvents] = useState<IHRMSBusinessEvent[]>(() => {
-    const stored = localStorage.getItem('hrms_business_events');
-    return stored ? JSON.parse(stored) : initialHRMSEvents;
-  });
+      try {
+        const loadedRules = await api.getPayrollRules();
+        if (loadedRules && loadedRules.length > 0) setPayrollRules(loadedRules);
+      } catch (e) { console.warn('Payroll Rules API fallback:', e); }
 
-  const [payrollRules, setPayrollRules] = useState<IHRMSPayrollRule[]>(() => {
-    const stored = localStorage.getItem('hrms_payroll_rules');
-    return stored ? JSON.parse(stored) : initialHRMSPayrollRules;
-  });
+      try {
+        const loadedEvents = await api.getBusinessEvents();
+        if (loadedEvents && loadedEvents.length > 0) setBusinessEvents(loadedEvents);
+      } catch (e) { console.warn('Events API fallback:', e); }
+    };
+    loadHRMSData();
+  }, []);
 
   // Backup state to local storage on changes
   useEffect(() => {
@@ -365,6 +379,10 @@ export default function HRMS() {
     setEmployees(prev => [newEmployee, ...prev]);
     setContracts(prev => [newContract, ...prev]);
     setOnboardingTasks(prev => [...tasks, ...prev]);
+
+    // Send to backend API asynchronously
+    api.createEmployee(newEmployee).catch(e => console.error('API employee save error:', e));
+    api.createContract(newContract).catch(e => console.error('API contract save error:', e));
 
     // Publish Business Events
     emitBusinessEvent(

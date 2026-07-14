@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Bed, Plus, CheckCircle, Users, Sparkles, Wrench, X, ShieldAlert } from 'lucide-react';
 import { PageHeader, AlertBanner } from '../components/ui/pms-ui';
 import {
@@ -17,6 +17,7 @@ import {
 } from '../mockData';
 import { IRoom, IRoomCategory, IAmenity, TRoomStatus } from '../types';
 import { calculateRoomStatus } from '../components/rooms/roomUtils';
+import { api } from '../utils/api';
 
 // Modular Component Imports
 import RoomFilters from '../components/rooms/RoomFilters';
@@ -27,37 +28,38 @@ import RoomDetailsDrawer from '../components/rooms/RoomDetailsDrawer';
 
 export default function Rooms() {
   // Operational states loaded into React state for REST API readiness
-  const [rooms, setRooms] = useState<IRoom[]>(() => {
-    const stored = localStorage.getItem('pms_rooms');
-    if (stored) {
-      try { return JSON.parse(stored); } catch (e) {}
-    }
-    return mockRooms;
-  });
-  const [categories, setCategories] = useState<IRoomCategory[]>(() => {
-    const stored = localStorage.getItem('pms_room_categories');
-    if (stored) {
-      try { return JSON.parse(stored); } catch (e) {}
-    }
-    return mockRoomCategories;
-  });
+  const [rooms, setRooms] = useState<IRoom[]>(mockRooms);
+  const [categories, setCategories] = useState<IRoomCategory[]>(mockRoomCategories);
   const [amenities, setAmenities] = useState<IAmenity[]>(mockAmenities);
-  const [reservations, setReservations] = useState(() => {
-    const stored = localStorage.getItem('pms_reservations');
-    if (stored) {
-      try { return JSON.parse(stored); } catch (e) {}
-    }
-    return mockReservations;
-  });
-  const [guests, setGuests] = useState(() => {
-    const stored = localStorage.getItem('pms_guests');
-    if (stored) {
-      try { return JSON.parse(stored); } catch (e) {}
-    }
-    return mockGuests;
-  });
+  const [reservations, setReservations] = useState(mockReservations);
+  const [guests, setGuests] = useState(mockGuests);
   const [housekeepingTasks, setHousekeepingTasks] = useState(mockHousekeepingTasks);
   const [maintenanceTickets, setMaintenanceTickets] = useState(mockMaintenanceTickets);
+
+  // Load from API on mount
+  useEffect(() => {
+    const loadAllData = async () => {
+      try {
+        const loadedRooms = await api.getRooms();
+        if (loadedRooms && loadedRooms.length > 0) setRooms(loadedRooms);
+      } catch (e) {
+        console.warn('Rooms API fallback:', e);
+      }
+      try {
+        const loadedGuests = await api.getGuests();
+        if (loadedGuests && loadedGuests.length > 0) setGuests(loadedGuests);
+      } catch (e) {
+        console.warn('Guests API fallback:', e);
+      }
+      try {
+        const loadedRes = await api.getReservations();
+        if (loadedRes && loadedRes.length > 0) setReservations(loadedRes);
+      } catch (e) {
+        console.warn('Reservations API fallback:', e);
+      }
+    };
+    loadAllData();
+  }, []);
 
   // Filter & Layout States
   const [searchQuery, setSearchQuery] = useState('');
@@ -146,9 +148,15 @@ export default function Rooms() {
   }, [rooms, roomCalculatedStatuses]);
 
   // Create or Update Room Handler
-  const handleSaveRoom = (formData: Partial<IRoom>) => {
+  const handleSaveRoom = async (formData: Partial<IRoom>) => {
     if (editingRoom) {
       // Editing
+      try {
+        await api.updateRoom(editingRoom.id, formData);
+      } catch (err) {
+        console.error('API Error saving room:', err);
+      }
+
       setRooms(prev => prev.map(r => r.id === editingRoom.id ? {
         ...r,
         ...formData,
@@ -164,8 +172,9 @@ export default function Rooms() {
         return;
       }
 
+      const tempId = `room-${Date.now()}`;
       const newRoom: IRoom = {
-        id: `room-${Date.now()}`,
+        id: tempId,
         room_number: formData.room_number!,
         category_id: formData.category_id!,
         floor: formData.floor!,
@@ -183,6 +192,12 @@ export default function Rooms() {
         updated_by: 'Administrateur'
       };
 
+      try {
+        await api.createRoom(newRoom);
+      } catch (err) {
+        console.error('API Error creating room:', err);
+      }
+
       setRooms(prev => [...prev, newRoom]);
       setSuccessMsg(`La chambre ${newRoom.room_number} a été ajoutée au référentiel.`);
     }
@@ -194,21 +209,28 @@ export default function Rooms() {
   };
 
   // Toggle Room Active State
-  const handleToggleActive = (room: IRoom) => {
+  const handleToggleActive = async (room: IRoom) => {
+    const nextActive = !room.active;
+    try {
+      await api.updateRoom(room.id, { active: nextActive });
+    } catch (err) {
+      console.error('API Error toggling room active:', err);
+    }
+
     setRooms(prev => prev.map(r => r.id === room.id ? {
       ...r,
-      active: !r.active,
+      active: nextActive,
       updated_at: new Date().toISOString(),
       updated_by: 'Administrateur'
     } : r));
 
-    const newState = !room.active ? 'activée' : 'désactivée';
+    const newState = nextActive ? 'activée' : 'désactivée';
     setSuccessMsg(`La chambre ${room.room_number} a été ${newState} avec succès.`);
     setTimeout(() => setSuccessMsg(''), 4000);
   };
 
   // Delete Room
-  const handleDeleteRoom = (room: IRoom) => {
+  const handleDeleteRoom = async (room: IRoom) => {
     const isOccupied = roomCalculatedStatuses[room.id] === 'Occupée';
     if (isOccupied) {
       alert(`Impossible de supprimer la chambre ${room.room_number} car elle est actuellement occupée par un client.`);
@@ -216,6 +238,12 @@ export default function Rooms() {
     }
 
     if (confirm(`Voulez-vous vraiment supprimer la chambre ${room.room_number} du référentiel ? Cette action est irréversible.`)) {
+      try {
+        await api.deleteRoom(room.id);
+      } catch (err) {
+        console.error('API Error deleting room:', err);
+      }
+
       setRooms(prev => prev.filter(r => r.id !== room.id));
       setSuccessMsg(`La chambre ${room.room_number} a été retirée du référentiel.`);
       setTimeout(() => setSuccessMsg(''), 4000);
