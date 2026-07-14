@@ -7,7 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { Sparkles, CheckSquare, Search, Filter, RefreshCw, CheckCircle2, User, HelpCircle } from 'lucide-react';
 import { PageHeader, Badge, AlertBanner } from '../components/ui/pms-ui';
 import { mockHousekeepingTasks, mockRooms, mockStockItems } from '../mockData';
-import { IHousekeepingTask, IRoom, THousekeepingStatus } from '../types';
+import { IHousekeepingTask, IRoom, IStockItem, THousekeepingStatus } from '../types';
 import { api } from '../utils/api';
 import { logManualStockMovement } from '../stockService';
 
@@ -61,15 +61,15 @@ export default function Housekeeping() {
   }, []);
 
   const triggerLinenMovement = (roomId: string) => {
-    const targetRoom = rooms.find(r => r.id === roomId);
+    const targetRoom = rooms.find((r) => r.id === roomId);
     if (!targetRoom) return;
 
     // Load stock from localStorage
-    let currentStock = [];
+    let currentStock: IStockItem[] = [];
     const storedStock = localStorage.getItem('pms_stock');
     if (storedStock) {
       try {
-        currentStock = JSON.parse(storedStock);
+        currentStock = JSON.parse(storedStock) as IStockItem[];
       } catch (e) {
         currentStock = [...mockStockItems];
       }
@@ -88,10 +88,10 @@ export default function Housekeeping() {
 
     // Check if clean stock is sufficient
     let lowStockWarning = false;
-    const cleanSheets = currentStock.find(s => s.id === 'stk-3');
-    const cleanBedspreads = currentStock.find(s => s.id === 'stk-5');
-    const cleanPillows = currentStock.find(s => s.id === 'stk-6');
-    const cleanTowels = currentStock.find(s => s.id === 'stk-7');
+    const cleanSheets = currentStock.find((s) => s.id === 'stk-3');
+    const cleanBedspreads = currentStock.find((s) => s.id === 'stk-5');
+    const cleanPillows = currentStock.find((s) => s.id === 'stk-6');
+    const cleanTowels = currentStock.find((s) => s.id === 'stk-7');
 
     if (
       (cleanSheets && cleanSheets.current_stock < sheetsQty) ||
@@ -103,7 +103,7 @@ export default function Housekeeping() {
     }
 
     // Update stock
-    const updatedStock = currentStock.map(item => {
+    const updatedStock = currentStock.map((item) => {
       switch (item.id) {
         // Clean Linen (decreases)
         case 'stk-3': return { ...item, current_stock: Math.max(0, item.current_stock - sheetsQty) };
@@ -172,8 +172,8 @@ export default function Housekeeping() {
     if (newStatus === 'Disponible') {
       const task = tasks.find((t) => t.id === id);
       if (task) {
-        const updatedRooms = rooms.map((r) =>
-          r.id === task.room_id ? { ...r, housekeeping_status: 'Disponible' } : r
+        const updatedRooms = rooms.map((r): IRoom =>
+          r.id === task.room_id ? { ...r, housekeeping_status: 'Disponible' as THousekeepingStatus } : r
         );
         setRooms(updatedRooms);
         localStorage.setItem('pms_rooms', JSON.stringify(updatedRooms));
@@ -187,8 +187,17 @@ export default function Housekeeping() {
     }
   };
 
+  const cleanedRoomsCount = rooms.filter((r) => r.housekeeping_status === 'Disponible').length;
+  const housekeepingProgress = rooms.length ? Math.round((cleanedRoomsCount / rooms.length) * 100) : 0;
+  const housekeepingProgressWidth = rooms.length ? (cleanedRoomsCount / rooms.length) * 100 : 0;
+
   const getRoomNum = (roomId: string) => {
     return rooms.find((r) => r.id === roomId)?.room_number || '-';
+  };
+
+  const handleValidateTask = (task: IHousekeepingTask) => {
+    updateTaskStatus(task.id, 'Disponible');
+    triggerLinenMovement(task.room_id);
   };
 
   return (
@@ -212,13 +221,13 @@ export default function Housekeeping() {
             <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">État Global Propreté</h4>
             <div className="space-y-2">
               <div className="flex justify-between text-xs font-bold text-slate-700">
-                <span>Propre & Prête : {rooms.filter(r => r.housekeeping_status === 'Disponible').length} / {rooms.length}</span>
-                <span>{Math.round((rooms.filter(r => r.housekeeping_status === 'Disponible').length / rooms.length) * 100)}%</span>
+                <span>Propre & Prête : {cleanedRoomsCount} / {rooms.length}</span>
+                <span>{housekeepingProgress}%</span>
               </div>
               <div className="w-full bg-slate-100 rounded-full h-2">
                 <div 
                   className="bg-emerald-500 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${(rooms.filter(r => r.housekeeping_status === 'Disponible').length / rooms.length) * 100}%` }}
+                  style={{ width: `${housekeepingProgressWidth}%` }}
                 ></div>
               </div>
             </div>
@@ -290,14 +299,7 @@ export default function Housekeeping() {
                       )}
                       {task.status === 'Contrôle' && (
                         <button
-                          onClick={() => {
-                            updateTaskStatus(task.id, 'Disponible');
-                            // Sync rooms state & save to localstorage
-                            const updatedRooms = rooms.map(r => r.id === task.room_id ? { ...r, housekeeping_status: 'Disponible' } : r);
-                            setRooms(updatedRooms);
-                            localStorage.setItem('pms_rooms', JSON.stringify(updatedRooms));
-                            triggerLinenMovement(task.room_id);
-                          }}
+                          onClick={() => handleValidateTask(task)}
                           className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-[10px] px-2.5 py-1 rounded cursor-pointer"
                         >
                           Valider (Propre)

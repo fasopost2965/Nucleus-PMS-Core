@@ -12,7 +12,7 @@ router.get('/', async (req, res, next) => {
     const params = q ? [`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`] : [];
 
     const guests = await query(
-      `SELECT id, first_name AS firstName, last_name AS lastName, email, phone, nationality FROM guests ${whereClause} ORDER BY last_name, first_name`,
+      `SELECT id, first_name AS first_name, last_name AS last_name, email, phone, nationality FROM guests ${whereClause} ORDER BY last_name, first_name`,
       params
     );
 

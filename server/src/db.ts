@@ -29,8 +29,8 @@ function getFallbackTable(sql: string): string | null {
 
 export async function query<T = any>(sql: string, params: any[] = []): Promise<T> {
   try {
-    const [rows] = await getDbPool().query<T>(sql, params);
-    return rows;
+    const [rows] = await getDbPool().query(sql, params);
+    return rows as unknown as T;
   } catch (error) {
     const table = getFallbackTable(sql);
     if (table) {

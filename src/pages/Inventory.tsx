@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Boxes, Plus, Search, HelpCircle, AlertTriangle, 
   RefreshCw, Trash2, Home, Check, CheckSquare, Layers, 
@@ -12,6 +12,7 @@ import {
 import { PageHeader, Badge, AlertBanner } from '../components/ui/pms-ui';
 import { mockStockItems, mockSuppliers, mockRooms } from '../mockData';
 import { IStockItem, IStockMovement, ISupplier } from '../types';
+import { api } from '../utils/api';
 import { getStockMovements, saveStockMovements, logManualStockMovement, formatCurrentTimestamp } from '../stockService';
 
 export default function Inventory() {
@@ -50,6 +51,8 @@ export default function Inventory() {
   const [searchQuery, setSearchQuery] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [showAdjModal, setShowAdjModal] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   
   // Navigation tabs
   const [activeTab, setActiveTab] = useState<'general' | 'lingerie' | 'standards' | 'movements'>('general');
@@ -75,7 +78,50 @@ export default function Inventory() {
     localStorage.setItem('pms_stock', JSON.stringify(newStock));
   };
 
-  const handleAdjustStock = (e: React.FormEvent) => {
+  useEffect(() => {
+    const loadInventory = async () => {
+      setLoading(true);
+      setLoadError(null);
+
+      try {
+        const [stockItems, suppliersData, roomsData, movementsData] = await Promise.all([
+          api.getInventoryStock(),
+          api.getSuppliers(),
+          api.getInventoryRooms(),
+          api.getStockMovements()
+        ]);
+
+        if (stockItems.length > 0) {
+          setStock(stockItems);
+          localStorage.setItem('pms_stock', JSON.stringify(stockItems));
+        }
+
+        if (suppliersData.length > 0) {
+          setSuppliers(suppliersData);
+          localStorage.setItem('pms_suppliers', JSON.stringify(suppliersData));
+        }
+
+        if (roomsData.length > 0) {
+          setDemoRoomId(String(roomsData[0].id));
+          localStorage.setItem('pms_rooms', JSON.stringify(roomsData));
+        }
+
+        if (movementsData.length > 0) {
+          setMovements(movementsData);
+          localStorage.setItem('pms_stock_movements', JSON.stringify(movementsData));
+        }
+      } catch (error) {
+        console.error('Chargement inventaire API échoué :', error);
+        setLoadError('Impossible de charger l’inventaire depuis le serveur. Le mode local est activé.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadInventory();
+  }, []);
+
+  const handleAdjustStock = async (e: React.FormEvent) => {
     e.preventDefault();
     const itemToAdjust = stock.find(item => item.id === selectedItemId);
     const updated = stock.map(item => {
@@ -103,6 +149,27 @@ export default function Inventory() {
         adjType === 'in' ? 'Ajustement Entrée' : 'Ajustement Sortie'
       );
       setMovements(getStockMovements());
+
+      try {
+        await api.updateStockItem(itemToAdjust.sku, { current_stock: updated.find(item => item.id === selectedItemId)?.current_stock });
+      } catch (error) {
+        console.error('Échec mise à jour stock API :', error);
+      }
+
+      try {
+        await api.createStockMovement({
+          item_id: itemToAdjust.sku,
+          item_name: itemToAdjust.name,
+          sku: itemToAdjust.sku,
+          quantity: adjQty,
+          from_location: adjType === 'in' ? 'Fournisseur' : 'Entrepôt',
+          to_location: adjType === 'in' ? 'Entrepôt' : 'Utilisation',
+          staff_name: 'Amadou (Super Admin)',
+          type: adjType === 'in' ? 'Ajustement Entrée' : 'Ajustement Sortie'
+        });
+      } catch (error) {
+        console.error('Échec log mouvement API :', error);
+      }
     }
 
     setShowAdjModal(false);
@@ -111,7 +178,7 @@ export default function Inventory() {
   };
 
   // Automated washing cycle (moving from Linge Sale / Buanderie to Linge Propre)
-  const handleWashingCycle = (type: 'all' | 'specific') => {
+  const handleWashingCycle = async (type: 'all' | 'specific') => {
     const updated = stock.map(item => {
       if (type === 'all') {
         // Move all dirty items to clean
@@ -163,10 +230,71 @@ export default function Inventory() {
 
     saveStock(updated);
 
-    if (sQty > 0) logManualStockMovement('stk-3', 'Draps Plat Coton (Linge Propre)', 'DRAP-CTN-PROP', sQty, 'Linge Sale (Buanderie)', 'Linge Propre', 'Awa (Housekeeping)', 'Lavage Buanderie');
-    if (bQty > 0) logManualStockMovement('stk-5', 'Couvre-lits Satin (Linge Propre)', 'COUV-SAT-PROP', bQty, 'Linge Sale (Buanderie)', 'Linge Propre', 'Awa (Housekeeping)', 'Lavage Buanderie');
-    if (pQty > 0) logManualStockMovement('stk-6', 'Taies d\'oreiller Coton (Linge Propre)', 'TAIE-CTN-PROP', pQty, 'Linge Sale (Buanderie)', 'Linge Propre', 'Awa (Housekeeping)', 'Lavage Buanderie');
-    if (tQty > 0) logManualStockMovement('stk-7', 'Serviettes de bain (Linge Propre)', 'SERV-BAIN-PROP', tQty, 'Linge Sale (Buanderie)', 'Linge Propre', 'Awa (Housekeeping)', 'Lavage Buanderie');
+    try {
+      await api.updateStockItem('DRAP-CTN-PROP', { current_stock: updated.find(item => item.id === 'stk-3')?.current_stock });
+      await api.updateStockItem('DRAP-CTN-SALE', { current_stock: updated.find(item => item.id === 'stk-3-sale')?.current_stock });
+      await api.updateStockItem('COUV-SAT-PROP', { current_stock: updated.find(item => item.id === 'stk-5')?.current_stock });
+      await api.updateStockItem('COUV-SAT-SALE', { current_stock: updated.find(item => item.id === 'stk-5-sale')?.current_stock });
+      await api.updateStockItem('TAIE-CTN-PROP', { current_stock: updated.find(item => item.id === 'stk-6')?.current_stock });
+      await api.updateStockItem('TAIE-CTN-SALE', { current_stock: updated.find(item => item.id === 'stk-6-sale')?.current_stock });
+      await api.updateStockItem('SERV-BAIN-PROP', { current_stock: updated.find(item => item.id === 'stk-7')?.current_stock });
+      await api.updateStockItem('SERV-BAIN-SALE', { current_stock: updated.find(item => item.id === 'stk-7-sale')?.current_stock });
+    } catch (error) {
+      console.error('Échec mise à jour stock API cycle de lavage :', error);
+    }
+
+    if (sQty > 0) {
+      logManualStockMovement('stk-3', 'Draps Plat Coton (Linge Propre)', 'DRAP-CTN-PROP', sQty, 'Linge Sale (Buanderie)', 'Linge Propre', 'Awa (Housekeeping)', 'Lavage Buanderie');
+      await api.createStockMovement({
+        item_id: 'DRAP-CTN-PROP',
+        item_name: 'Draps Plat Coton (Linge Propre)',
+        sku: 'DRAP-CTN-PROP',
+        quantity: sQty,
+        from_location: 'Linge Sale (Buanderie)',
+        to_location: 'Linge Propre',
+        staff_name: 'Awa (Housekeeping)',
+        type: 'Lavage Buanderie'
+      }).catch((error) => console.error('Échec log mouvement API linge propre :', error));
+    }
+    if (bQty > 0) {
+      logManualStockMovement('stk-5', 'Couvre-lits Satin (Linge Propre)', 'COUV-SAT-PROP', bQty, 'Linge Sale (Buanderie)', 'Linge Propre', 'Awa (Housekeeping)', 'Lavage Buanderie');
+      await api.createStockMovement({
+        item_id: 'COUV-SAT-PROP',
+        item_name: 'Couvre-lits Satin (Linge Propre)',
+        sku: 'COUV-SAT-PROP',
+        quantity: bQty,
+        from_location: 'Linge Sale (Buanderie)',
+        to_location: 'Linge Propre',
+        staff_name: 'Awa (Housekeeping)',
+        type: 'Lavage Buanderie'
+      }).catch((error) => console.error('Échec log mouvement API linge propre :', error));
+    }
+    if (pQty > 0) {
+      logManualStockMovement('stk-6', 'Taies d\'oreiller Coton (Linge Propre)', 'TAIE-CTN-PROP', pQty, 'Linge Sale (Buanderie)', 'Linge Propre', 'Awa (Housekeeping)', 'Lavage Buanderie');
+      await api.createStockMovement({
+        item_id: 'TAIE-CTN-PROP',
+        item_name: 'Taies d\'oreiller Coton (Linge Propre)',
+        sku: 'TAIE-CTN-PROP',
+        quantity: pQty,
+        from_location: 'Linge Sale (Buanderie)',
+        to_location: 'Linge Propre',
+        staff_name: 'Awa (Housekeeping)',
+        type: 'Lavage Buanderie'
+      }).catch((error) => console.error('Échec log mouvement API linge propre :', error));
+    }
+    if (tQty > 0) {
+      logManualStockMovement('stk-7', 'Serviettes de bain (Linge Propre)', 'SERV-BAIN-PROP', tQty, 'Linge Sale (Buanderie)', 'Linge Propre', 'Awa (Housekeeping)', 'Lavage Buanderie');
+      await api.createStockMovement({
+        item_id: 'SERV-BAIN-PROP',
+        item_name: 'Serviettes de bain (Linge Propre)',
+        sku: 'SERV-BAIN-PROP',
+        quantity: tQty,
+        from_location: 'Linge Sale (Buanderie)',
+        to_location: 'Linge Propre',
+        staff_name: 'Awa (Housekeeping)',
+        type: 'Lavage Buanderie'
+      }).catch((error) => console.error('Échec log mouvement API linge propre :', error));
+    }
 
     setMovements(getStockMovements());
     setWashQuantities({ sheets: 0, bedspreads: 0, pillows: 0, towels: 0 });
@@ -175,7 +303,7 @@ export default function Inventory() {
   };
 
   // Demo tool: simulate room cleaning to show stock flows
-  const simulateRoomCleaning = (roomId: string) => {
+  const simulateRoomCleaning = async (roomId: string) => {
     // Rooms list
     let roomsList = [];
     const storedRooms = localStorage.getItem('pms_rooms');
@@ -230,6 +358,19 @@ export default function Inventory() {
 
     saveStock(updated);
 
+    try {
+      await api.updateStockItem('DRAP-CTN-PROP', { current_stock: updated.find(item => item.id === 'stk-3')?.current_stock });
+      await api.updateStockItem('DRAP-CTN-SALE', { current_stock: updated.find(item => item.id === 'stk-3-sale')?.current_stock });
+      await api.updateStockItem('COUV-SAT-PROP', { current_stock: updated.find(item => item.id === 'stk-5')?.current_stock });
+      await api.updateStockItem('COUV-SAT-SALE', { current_stock: updated.find(item => item.id === 'stk-5-sale')?.current_stock });
+      await api.updateStockItem('TAIE-CTN-PROP', { current_stock: updated.find(item => item.id === 'stk-6')?.current_stock });
+      await api.updateStockItem('TAIE-CTN-SALE', { current_stock: updated.find(item => item.id === 'stk-6-sale')?.current_stock });
+      await api.updateStockItem('SERV-BAIN-PROP', { current_stock: updated.find(item => item.id === 'stk-7')?.current_stock });
+      await api.updateStockItem('SERV-BAIN-SALE', { current_stock: updated.find(item => item.id === 'stk-7-sale')?.current_stock });
+    } catch (error) {
+      console.error('Échec mise à jour stock API simulation chambre :', error);
+    }
+
     // Log the movements
     logManualStockMovement('stk-3', 'Draps Plat Coton (Linge Propre)', 'DRAP-CTN-PROP', sheetsQty, 'Linge Propre', `Chambre ${room.room_number}`, 'Awa (Housekeeping)', 'Dotation Chambre');
     logManualStockMovement('stk-3-sale', 'Draps Plat Coton (Linge Sale)', 'DRAP-CTN-SALE', sheetsQty, `Chambre ${room.room_number}`, 'Linge Sale (Buanderie)', 'Awa (Housekeeping)', 'Envoi Buanderie');
@@ -245,6 +386,19 @@ export default function Inventory() {
 
     setMovements(getStockMovements());
 
+    try {
+      await api.updateStockItem('DRAP-CTN-PROP', { current_stock: updated.find(item => item.id === 'stk-3')?.current_stock });
+      await api.updateStockItem('DRAP-CTN-SALE', { current_stock: updated.find(item => item.id === 'stk-3-sale')?.current_stock });
+      await api.updateStockItem('COUV-SAT-PROP', { current_stock: updated.find(item => item.id === 'stk-5')?.current_stock });
+      await api.updateStockItem('COUV-SAT-SALE', { current_stock: updated.find(item => item.id === 'stk-5-sale')?.current_stock });
+      await api.updateStockItem('TAIE-CTN-PROP', { current_stock: updated.find(item => item.id === 'stk-6')?.current_stock });
+      await api.updateStockItem('TAIE-CTN-SALE', { current_stock: updated.find(item => item.id === 'stk-6-sale')?.current_stock });
+      await api.updateStockItem('SERV-BAIN-PROP', { current_stock: updated.find(item => item.id === 'stk-7')?.current_stock });
+      await api.updateStockItem('SERV-BAIN-SALE', { current_stock: updated.find(item => item.id === 'stk-7-sale')?.current_stock });
+    } catch (error) {
+      console.error('Échec mise à jour stock API simulation chambre :', error);
+    }
+
     if (lowStockWarning) {
       setSuccessMsg(`[Simulation] Chambre ${room.room_number} nettoyée ! ⚠️ Alerte stock bas sur le linge propre.`);
     } else {
@@ -257,7 +411,7 @@ export default function Inventory() {
     return suppliers.find(s => s.id === id)?.company_name || 'SOCOCE';
   };
 
-  const handleAddSupplier = (e: React.FormEvent) => {
+  const handleAddSupplier = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSupplier.company_name.trim()) return;
 
@@ -270,9 +424,6 @@ export default function Inventory() {
       address: newSupplier.address || 'Non renseigné'
     };
 
-    const updatedSuppliers = [...suppliers, supplierToAdd];
-    setSuppliers(updatedSuppliers);
-    localStorage.setItem('pms_suppliers', JSON.stringify(updatedSuppliers));
     setShowAddSupplierModal(false);
 
     // Reset form
@@ -283,6 +434,20 @@ export default function Inventory() {
       email: '',
       address: ''
     });
+
+    try {
+      const res = await api.createSupplier(supplierToAdd);
+      const finalSuppliers = res.success && res.supplier
+        ? [...suppliers, res.supplier]
+        : [...suppliers, supplierToAdd];
+      setSuppliers(finalSuppliers);
+      localStorage.setItem('pms_suppliers', JSON.stringify(finalSuppliers));
+    } catch (error) {
+      console.error('Échec création fournisseur API :', error);
+      const finalSuppliers = [...suppliers, supplierToAdd];
+      setSuppliers(finalSuppliers);
+      localStorage.setItem('pms_suppliers', JSON.stringify(finalSuppliers));
+    }
 
     setSuccessMsg(`Le fournisseur "${supplierToAdd.company_name}" a été enregistré.`);
     setTimeout(() => setSuccessMsg(''), 4000);
@@ -368,6 +533,9 @@ export default function Inventory() {
       <div className="p-6 lg:p-8 space-y-6 flex-1 overflow-y-auto">
         {successMsg && (
           <AlertBanner text={successMsg} type="success" />
+        )}
+        {loadError && (
+          <AlertBanner text={loadError} type="warning" />
         )}
 
         {/* METRICS ROW */}

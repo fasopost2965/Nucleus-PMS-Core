@@ -23,7 +23,7 @@ router.get('/', async (req, res, next) => {
 
     const whereClause = filters.length > 0 ? `WHERE ${filters.join(' AND ')}` : '';
     const rooms = await query(
-      `SELECT id, room_number AS room_number, floor, status, category, category_id, housekeeping_status, maintenance_status, price_per_night AS pricePerNight FROM rooms ${whereClause} ORDER BY room_number`,
+      `SELECT id, room_number AS room_number, floor, status, category, category_id, housekeeping_status, maintenance_status, price_per_night AS pricePerNight, price_per_night AS base_price FROM rooms ${whereClause} ORDER BY room_number`,
       params
     );
 

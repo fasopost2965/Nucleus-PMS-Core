@@ -8,8 +8,9 @@ import { useLocation } from 'react-router-dom';
 import { CalendarDays, Plus, Search, Filter, Trash2, CheckSquare, XCircle, Users, Bed, Coins, ArrowRight, X } from 'lucide-react';
 import { PageHeader, Badge, AlertBanner } from '../components/ui/pms-ui';
 import { mockReservations, mockGuests, mockRooms, mockBookingSources } from '../mockData';
-import { IReservation, TReservationStatus } from '../types';
+import { IReservation, IGuest, IRoom, TReservationStatus } from '../types';
 import { AnimatePresence, motion } from 'motion/react';
+import { api } from '../utils/api';
 
 export default function Reservations() {
   const location = useLocation();
@@ -20,9 +21,62 @@ export default function Reservations() {
     }
     return mockReservations;
   });
+  const [guests, setGuests] = useState<IGuest[]>(() => {
+    const stored = localStorage.getItem('pms_guests');
+    if (stored) {
+      try { return JSON.parse(stored); } catch (e) {}
+    }
+    return mockGuests;
+  });
+  const [rooms, setRooms] = useState<IRoom[]>(() => {
+    const stored = localStorage.getItem('pms_rooms');
+    if (stored) {
+      try { return JSON.parse(stored); } catch (e) {}
+    }
+    return mockRooms;
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState('');
+
+  useEffect(() => {
+    const loadReservationsData = async () => {
+      setLoading(true);
+      setLoadError(null);
+
+      try {
+        const [reservationsData, roomsData, guestsData] = await Promise.all([
+          api.getReservations(),
+          api.getRooms(),
+          api.getGuests()
+        ]);
+
+        if (Array.isArray(reservationsData) && reservationsData.length > 0) {
+          setReservations(reservationsData);
+          localStorage.setItem('pms_reservations', JSON.stringify(reservationsData));
+        }
+
+        if (Array.isArray(roomsData) && roomsData.length > 0) {
+          setRooms(roomsData);
+          localStorage.setItem('pms_rooms', JSON.stringify(roomsData));
+        }
+
+        if (Array.isArray(guestsData) && guestsData.length > 0) {
+          setGuests(guestsData);
+          localStorage.setItem('pms_guests', JSON.stringify(guestsData));
+        }
+      } catch (error) {
+        console.error('Chargement Reservations API échoué :', error);
+        setLoadError('Impossible de charger les données des réservations. Mode dégradé activé.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadReservationsData();
+  }, []);
 
   // Creation form states
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -63,18 +117,49 @@ export default function Reservations() {
     }
   }, [location.state]);
 
-  const handleCreateReservation = (e: React.FormEvent) => {
+  const handleCreateReservation = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    const roomObj = mockRooms.find(r => r.id === selectedRoomId);
-    const guestObj = mockGuests.find(g => g.id === selectedGuestId);
+
+    const roomObj = rooms.find((r) => String(r.id) === selectedRoomId) || mockRooms.find((r) => r.id === selectedRoomId);
+    const guestObj = guests.find((g) => String(g.id) === selectedGuestId) || mockGuests.find((g) => g.id === selectedGuestId);
     if (!roomObj || !guestObj) return;
 
-    const rate = roomObj.base_price;
+    const rate = roomObj.base_price ?? 0;
     const subtotal = rate * nights;
-    const taxes = Math.round(subtotal * 0.05); // simulated hotel tax
+    const taxes = Math.round(subtotal * 0.05);
     const total = subtotal - discount + taxes;
     const balance = total - deposit;
+
+    const payload = {
+      guestId: selectedGuestId,
+      roomId: selectedRoomId,
+      source: selectedSourceId,
+      checkInDate: arrivalDate,
+      checkOutDate: departureDate,
+      adults,
+      children,
+      nights,
+      discount,
+      deposit,
+      notes: 'Réservation créée via l’interface de réception.'
+    };
+
+    try {
+      const response = await api.createReservation(payload);
+      if (response.success && response.reservation) {
+        const updatedList = [response.reservation, ...reservations];
+        setReservations(updatedList);
+        localStorage.setItem('pms_reservations', JSON.stringify(updatedList));
+        setStep(1);
+        setShowCreateModal(false);
+        setSuccessMsg(`La réservation ${response.reservation.reservation_number} a été créée avec succès.`);
+        setTimeout(() => setSuccessMsg(''), 4000);
+        return;
+      }
+    } catch (error) {
+      console.error('Erreur API création réservation :', error);
+      setLoadError('Impossible de créer la réservation sur le serveur. Mode local activé.');
+    }
 
     const newRes: IReservation = {
       id: `res-${Date.now()}`,
@@ -94,7 +179,7 @@ export default function Reservations() {
       total_amount: total,
       deposit,
       balance,
-      remarks: 'Réservation créée lors de la démonstration.'
+      remarks: 'Réservation créée en mode local.'
     };
 
     const updatedList = [newRes, ...reservations];
@@ -102,31 +187,53 @@ export default function Reservations() {
     localStorage.setItem('pms_reservations', JSON.stringify(updatedList));
     setStep(1);
     setShowCreateModal(false);
-    setSuccessMsg(`La réservation ${newRes.reservation_number} a été créée avec succès.`);
+    setSuccessMsg(`La réservation ${newRes.reservation_number} a été créée en mode local.`);
     setTimeout(() => setSuccessMsg(''), 4000);
   };
 
-  const updateReservationStatus = (id: string, newStatus: TReservationStatus) => {
-    const updatedList = reservations.map(r => r.id === id ? { ...r, status: newStatus } : r);
+  const updateReservationStatus = async (id: string, newStatus: TReservationStatus) => {
+    const updatedList = reservations.map((r) => (r.id === id ? { ...r, status: newStatus } : r));
     setReservations(updatedList);
     localStorage.setItem('pms_reservations', JSON.stringify(updatedList));
     setSuccessMsg(`Statut de la réservation mis à jour : ${newStatus}`);
     setTimeout(() => setSuccessMsg(''), 4000);
-  };
 
-  const deleteReservation = (id: string) => {
-    if (confirm('Voulez-vous supprimer définitivement cette réservation ?')) {
-      const updatedList = reservations.filter(r => r.id !== id);
-      setReservations(updatedList);
-      localStorage.setItem('pms_reservations', JSON.stringify(updatedList));
-      setSuccessMsg('Réservation supprimée.');
-      setTimeout(() => setSuccessMsg(''), 4000);
+    try {
+      if (newStatus === 'En séjour') {
+        await api.checkInReservation(id);
+      } else if (newStatus === 'Terminée') {
+        await api.checkOutReservation(id);
+      } else if (newStatus === 'Annulée') {
+        await api.cancelReservation(id);
+      }
+    } catch (error) {
+      console.error('Erreur API mise à jour statut réservation :', error);
+      setLoadError('Impossible de synchroniser le statut de la réservation avec le serveur.');
     }
   };
 
-  const selectedRoomObj = mockRooms.find(r => r.id === selectedRoomId);
-  const selectedGuestObj = mockGuests.find(g => g.id === selectedGuestId);
-  const selectedSourceObj = mockBookingSources.find(s => s.id === selectedSourceId);
+  const deleteReservation = async (id: string) => {
+    if (!confirm('Voulez-vous supprimer définitivement cette réservation ?')) {
+      return;
+    }
+
+    const updatedList = reservations.filter((r) => r.id !== id);
+    setReservations(updatedList);
+    localStorage.setItem('pms_reservations', JSON.stringify(updatedList));
+    setSuccessMsg('Réservation supprimée.');
+    setTimeout(() => setSuccessMsg(''), 4000);
+
+    try {
+      await api.deleteReservation(id);
+    } catch (error) {
+      console.error('Erreur API suppression réservation :', error);
+      setLoadError('Impossible de supprimer la réservation sur le serveur.');
+    }
+  };
+
+  const selectedRoomObj = rooms.find((r) => String(r.id) === selectedRoomId) || mockRooms.find((r) => r.id === selectedRoomId);
+  const selectedGuestObj = guests.find((g) => String(g.id) === selectedGuestId) || mockGuests.find((g) => g.id === selectedGuestId);
+  const selectedSourceObj = mockBookingSources.find((s) => s.id === selectedSourceId);
 
   return (
     <div className="flex flex-col h-full">
@@ -143,6 +250,9 @@ export default function Reservations() {
       <div className="p-6 lg:p-8 space-y-6 flex-1 overflow-y-auto">
         {successMsg && (
           <AlertBanner text={successMsg} type="success" />
+        )}
+        {loadError && (
+          <AlertBanner text={loadError} type="warning" />
         )}
 
         {/* RESERVATIONS TABLE WORKSPACE */}
@@ -198,16 +308,16 @@ export default function Reservations() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {reservations
-                  .filter(r => statusFilter === 'all' || r.status === statusFilter)
-                  .filter(r => {
-                    const guest = mockGuests.find(g => g.id === r.guest_id);
+                  .filter((r) => statusFilter === 'all' || r.status === statusFilter)
+                  .filter((r) => {
+                    const guest = guests.find((g) => String(g.id) === String(r.guest_id));
                     const guestName = guest ? `${guest.first_name} ${guest.last_name}` : '';
                     return r.reservation_number.includes(searchQuery) || guestName.toLowerCase().includes(searchQuery.toLowerCase());
                   })
                   .map((res) => {
-                    const guest = mockGuests.find(g => g.id === res.guest_id);
-                    const room = mockRooms.find(rm => rm.id === res.room_id);
-                    const source = mockBookingSources.find(s => s.id === res.booking_source_id);
+                    const guest = guests.find((g) => String(g.id) === String(res.guest_id));
+                    const room = rooms.find((rm) => String(rm.id) === String(res.room_id));
+                    const source = mockBookingSources.find((s) => s.id === res.booking_source_id);
                     
                     return (
                       <tr key={res.id} className="hover:bg-slate-50/50">
@@ -332,7 +442,7 @@ export default function Reservations() {
                             onChange={(e) => setSelectedGuestId(e.target.value)}
                             className="w-full border border-slate-200 bg-slate-50/50 hover:bg-slate-50 focus:bg-white rounded-lg px-3 py-2 text-xs focus:border-brand-orange focus:ring-1 focus:ring-brand-orange/30 focus:outline-none transition-all cursor-pointer font-medium"
                           >
-                            {mockGuests.map(g => (
+                            {guests.map(g => (
                               <option key={g.id} value={g.id}>{g.first_name} {g.last_name} ({g.nationality})</option>
                             ))}
                           </select>
@@ -411,8 +521,8 @@ export default function Reservations() {
                             onChange={(e) => setSelectedRoomId(e.target.value)}
                             className="w-full border border-slate-200 bg-slate-50/50 hover:bg-slate-50 focus:bg-white rounded-lg px-3 py-2 text-xs focus:border-brand-orange focus:ring-1 focus:ring-brand-orange/30 focus:outline-none transition-all cursor-pointer font-medium"
                           >
-                            {mockRooms.filter(r => r.current_status === 'Libre' || r.current_status === 'Disponible' || !r.current_status).map(r => (
-                              <option key={r.id} value={r.id}>Chambre {r.room_number} - {r.bed_type} ({r.base_price.toLocaleString()} XOF)</option>
+                            {rooms.filter(r => r.current_status === 'Libre' || r.current_status === 'Disponible' || !r.current_status).map(r => (
+                              <option key={r.id} value={r.id}>Chambre {r.room_number} - {r.bed_type} ({(r.base_price ?? 0).toLocaleString()} XOF)</option>
                             ))}
                           </select>
                         </div>

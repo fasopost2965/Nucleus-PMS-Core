@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Bell,
   CheckCircle,
@@ -25,6 +25,7 @@ import {
 import { PageHeader, Badge, AlertBanner } from '../components/ui/pms-ui';
 import { mockRooms, mockGuests, mockReservations } from '../mockData';
 import { IRoom, IReservation, IGuest, TRoomStatus } from '../types';
+import { api } from '../utils/api';
 import { handleRoomMaintenanceTrigger } from '../stockService';
 
 export default function Reception() {
@@ -54,6 +55,45 @@ export default function Reception() {
     }
     return mockGuests;
   });
+
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const [roomsData, reservationsData, guestsData] = await Promise.all([
+          api.getRooms(),
+          api.getReservations(),
+          api.getGuests()
+        ]);
+
+        if (Array.isArray(roomsData) && roomsData.length > 0) {
+          setRooms(roomsData);
+          localStorage.setItem('pms_rooms', JSON.stringify(roomsData));
+        }
+
+        if (Array.isArray(reservationsData) && reservationsData.length > 0) {
+          setReservations(reservationsData);
+          localStorage.setItem('pms_reservations', JSON.stringify(reservationsData));
+        }
+
+        if (Array.isArray(guestsData) && guestsData.length > 0) {
+          setGuests(guestsData);
+          localStorage.setItem('pms_guests', JSON.stringify(guestsData));
+        }
+      } catch (error) {
+        console.error('Chargement Reception API échoué :', error);
+        setLoadError('Impossible de charger les données de réception. Mode dégradé activé.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, []);
 
   // Dialog/Modal state for Check-in / Check-out
   const [activeTab, setActiveTab] = useState<'plan' | 'arrivals' | 'departures'>('plan');
@@ -90,6 +130,15 @@ export default function Reception() {
     setTimeout(() => setSuccessMsg(''), 6000);
   };
 
+  const updateRoomStatusRemote = async (roomId: string, newStatus: TRoomStatus) => {
+    try {
+      await api.updateRoom(roomId, { current_status: newStatus });
+    } catch (error) {
+      console.error('Erreur synchronisation statut chambre :', error);
+      setLoadError && setLoadError('Impossible de synchroniser le statut de la chambre avec le serveur.');
+    }
+  };
+
   const getGuestForRoom = (roomNum: string) => {
     const res = reservations.find(r => {
       const room = rooms.find(rm => rm.id === r.room_id);
@@ -107,16 +156,36 @@ export default function Reception() {
 
   const handleCheckIn = (resId: string, roomId: string) => {
     updateRoomStatus(roomId, 'Occupée');
+    updateRoomStatusRemote(roomId, 'Occupée');
     const updated = reservations.map(r => r.id === resId ? { ...r, status: 'En séjour' as const } : r);
     setReservations(updated);
     localStorage.setItem('pms_reservations', JSON.stringify(updated));
+
+    (async () => {
+      try {
+        await api.checkInReservation(resId);
+      } catch (error) {
+        console.error('Erreur API check-in :', error);
+        setLoadError('Impossible d’enregistrer le check-in sur le serveur.');
+      }
+    })();
   };
 
   const handleCheckOut = (resId: string, roomId: string) => {
     updateRoomStatus(roomId, 'À nettoyer');
+    updateRoomStatusRemote(roomId, 'À nettoyer');
     const updated = reservations.map(r => r.id === resId ? { ...r, status: 'Terminée' as const } : r);
     setReservations(updated);
     localStorage.setItem('pms_reservations', JSON.stringify(updated));
+
+    (async () => {
+      try {
+        await api.checkOutReservation(resId);
+      } catch (error) {
+        console.error('Erreur API check-out :', error);
+        setLoadError('Impossible d’enregistrer le check-out sur le serveur.');
+      }
+    })();
   };
 
   return (

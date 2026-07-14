@@ -5,35 +5,36 @@
 
 import React, { useState } from 'react';
 import { LogIn, Key, Mail, ShieldAlert } from 'lucide-react';
+import { api } from '../utils/api';
 
 interface LoginProps {
   onLoginSuccess: (user: { name: string; role: string; email: string }) => void;
 }
 
 export default function Login({ onLoginSuccess }: LoginProps) {
-  const [email, setEmail] = useState('fasopost24@gmail.com');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail] = useState('admin@nucleus-pms.com');
+  const [password, setPassword] = useState('Admin123!');
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
 
-    setTimeout(() => {
-      if (email.trim() && password.trim()) {
-        onLoginSuccess({
-          name: 'Amadou Koné',
-          role: 'Super Administrateur',
-          email: email
-        });
+    try {
+      const res = await api.login(email.trim(), password.trim());
+      if (res.success && res.user) {
+        onLoginSuccess(res.user);
       } else {
-        setError('Veuillez remplir tous les champs obligatoires.');
+        setError(res.error?.message || 'Identifiants invalides.');
       }
+    } catch (err: any) {
+      setError(err.message || 'Erreur lors de la connexion.');
+    } finally {
       setIsLoading(false);
-    }, 600);
+    }
   };
 
   return (
@@ -129,8 +130,8 @@ export default function Login({ onLoginSuccess }: LoginProps) {
           <div className="mt-8 p-3.5 bg-slate-50 border border-slate-200 rounded-lg">
             <h4 className="text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-2">Accès rapide démonstration</h4>
             <div className="text-[11px] text-slate-500 space-y-1">
-              <p>Email: <code className="bg-slate-200 px-1 rounded text-slate-700 font-mono font-bold">fasopost24@gmail.com</code></p>
-              <p>Mot de passe: <code className="bg-slate-200 px-1 rounded text-slate-700 font-mono font-bold">admin123</code></p>
+              <p>Email: <code className="bg-slate-200 px-1 rounded text-slate-700 font-mono font-bold">admin@nucleus-pms.com</code></p>
+              <p>Mot de passe: <code className="bg-slate-200 px-1 rounded text-slate-700 font-mono font-bold">Admin123!</code></p>
             </div>
           </div>
         </div>
