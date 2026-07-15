@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Bell,
   CheckCircle,
@@ -23,10 +23,11 @@ import {
   UserPlus
 } from 'lucide-react';
 import { PageHeader, Badge, AlertBanner } from '../components/ui/pms-ui';
-import { mockRooms, mockGuests, mockReservations } from '../mockData';
-import { IRoom, IReservation, IGuest, TRoomStatus } from '../types';
-import { api } from '../utils/api';
+import { mockRooms, mockGuests, mockReservations, mockInvoices } from '../mockData';
+import { IRoom, IReservation, IGuest, TRoomStatus, IInvoice } from '../types';
 import { handleRoomMaintenanceTrigger } from '../stockService';
+import PrintableReceipt from '../components/ui/PrintableReceipt';
+import { Printer } from 'lucide-react';
 
 export default function Reception() {
   const [rooms, setRooms] = useState<IRoom[]>(() => {
@@ -56,47 +57,43 @@ export default function Reception() {
     return mockGuests;
   });
 
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-      setLoadError(null);
-      try {
-        const [roomsData, reservationsData, guestsData] = await Promise.all([
-          api.getRooms(),
-          api.getReservations(),
-          api.getGuests()
-        ]);
-
-        if (Array.isArray(roomsData) && roomsData.length > 0) {
-          setRooms(roomsData);
-          localStorage.setItem('pms_rooms', JSON.stringify(roomsData));
-        }
-
-        if (Array.isArray(reservationsData) && reservationsData.length > 0) {
-          setReservations(reservationsData);
-          localStorage.setItem('pms_reservations', JSON.stringify(reservationsData));
-        }
-
-        if (Array.isArray(guestsData) && guestsData.length > 0) {
-          setGuests(guestsData);
-          localStorage.setItem('pms_guests', JSON.stringify(guestsData));
-        }
-      } catch (error) {
-        console.error('Chargement Reception API échoué :', error);
-        setLoadError('Impossible de charger les données de réception. Mode dégradé activé.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadData();
-  }, []);
-
   // Dialog/Modal state for Check-in / Check-out
   const [activeTab, setActiveTab] = useState<'plan' | 'arrivals' | 'departures'>('plan');
+
+  // Selected receipt data state for modal
+  const [selectedReceiptData, setSelectedReceiptData] = useState<{
+    invoice: IInvoice;
+    guest: IGuest;
+    reservation: IReservation;
+  } | null>(null);
+
+  const triggerPrintReceiptForReservation = (res: IReservation) => {
+    const guest = guests.find(g => g.id === res.guest_id);
+    if (!guest) return;
+
+    // Look for existing invoice or build a simulated one
+    const existingInv = mockInvoices.find(i => i.reservation_id === res.id);
+    const inv: IInvoice = existingInv || {
+      id: `inv-${res.id}`,
+      invoice_number: `FACT-${res.reservation_number.substring(4)}`,
+      reservation_id: res.id,
+      guest_id: res.guest_id,
+      subtotal: res.total_amount - res.tax_amount,
+      discount: res.discount,
+      tax: res.tax_amount,
+      total: res.total_amount,
+      paid: res.deposit,
+      balance: res.balance,
+      status: res.balance <= 0 ? 'Payée' : 'Émise',
+      issued_at: new Date().toISOString().replace('T', ' ').substring(0, 16)
+    };
+
+    setSelectedReceiptData({
+      invoice: inv,
+      guest,
+      reservation: res
+    });
+  };
   
   // Calculate operational widgets
   const arrivalsCount = reservations.filter(r => r.status === 'Confirmée').length;
@@ -130,15 +127,6 @@ export default function Reception() {
     setTimeout(() => setSuccessMsg(''), 6000);
   };
 
-  const updateRoomStatusRemote = async (roomId: string, newStatus: TRoomStatus) => {
-    try {
-      await api.updateRoom(roomId, { current_status: newStatus });
-    } catch (error) {
-      console.error('Erreur synchronisation statut chambre :', error);
-      setLoadError && setLoadError('Impossible de synchroniser le statut de la chambre avec le serveur.');
-    }
-  };
-
   const getGuestForRoom = (roomNum: string) => {
     const res = reservations.find(r => {
       const room = rooms.find(rm => rm.id === r.room_id);
@@ -156,36 +144,16 @@ export default function Reception() {
 
   const handleCheckIn = (resId: string, roomId: string) => {
     updateRoomStatus(roomId, 'Occupée');
-    updateRoomStatusRemote(roomId, 'Occupée');
     const updated = reservations.map(r => r.id === resId ? { ...r, status: 'En séjour' as const } : r);
     setReservations(updated);
     localStorage.setItem('pms_reservations', JSON.stringify(updated));
-
-    (async () => {
-      try {
-        await api.checkInReservation(resId);
-      } catch (error) {
-        console.error('Erreur API check-in :', error);
-        setLoadError('Impossible d’enregistrer le check-in sur le serveur.');
-      }
-    })();
   };
 
   const handleCheckOut = (resId: string, roomId: string) => {
     updateRoomStatus(roomId, 'À nettoyer');
-    updateRoomStatusRemote(roomId, 'À nettoyer');
     const updated = reservations.map(r => r.id === resId ? { ...r, status: 'Terminée' as const } : r);
     setReservations(updated);
     localStorage.setItem('pms_reservations', JSON.stringify(updated));
-
-    (async () => {
-      try {
-        await api.checkOutReservation(resId);
-      } catch (error) {
-        console.error('Erreur API check-out :', error);
-        setLoadError('Impossible d’enregistrer le check-out sur le serveur.');
-      }
-    })();
   };
 
   return (
@@ -392,12 +360,19 @@ export default function Reception() {
                               <td className="py-3.5 font-bold text-slate-900">{guest ? `${guest.first_name} ${guest.last_name}` : 'Inconnu'}</td>
                               <td className="py-3.5 font-mono text-rose-600 font-bold">{res.balance.toLocaleString()} XOF</td>
                               <td className="py-3.5"><Badge label={res.status} type="res" status={res.status} /></td>
-                              <td className="py-3.5 text-right">
+                              <td className="py-3.5 text-right space-x-1">
+                                <button 
+                                  onClick={() => triggerPrintReceiptForReservation(res)}
+                                  className="text-slate-400 hover:text-brand-orange hover:bg-slate-50 inline-block p-1.5 rounded transition-colors"
+                                  title="Imprimer la Facture / Reçu client"
+                                >
+                                  <Printer size={13} />
+                                </button>
                                 <button 
                                   onClick={() => {
                                     handleCheckOut(res.id, res.room_id);
                                   }}
-                                  className="bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-bold px-2.5 py-1 rounded"
+                                  className="bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-bold px-2.5 py-1.5 rounded transition-colors inline-block"
                                 >
                                   Check-Out
                                 </button>
@@ -505,13 +480,31 @@ export default function Reception() {
                     )}
 
                     {selectedRoom.current_status === 'Occupée' && (
-                      <button 
-                        onClick={() => updateRoomStatus(selectedRoom.id, 'À nettoyer')}
-                        className="w-full bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold py-2 rounded-lg transition-colors flex items-center justify-center space-x-1.5 cursor-pointer"
-                      >
-                        <LogOut size={14} />
-                        <span>Enregistrer le Check-Out</span>
-                      </button>
+                      <div className="space-y-2">
+                        {(() => {
+                          const res = getReservationForRoom(selectedRoom.id);
+                          if (res) {
+                            return (
+                              <button
+                                onClick={() => triggerPrintReceiptForReservation(res)}
+                                className="w-full bg-brand-orange hover:bg-brand-orange-hover text-white text-xs font-extrabold py-2 rounded-lg transition-colors flex items-center justify-center space-x-1.5 cursor-pointer shadow-sm"
+                              >
+                                <Printer size={14} />
+                                <span>Facture Provisoire / Reçu</span>
+                              </button>
+                            );
+                          }
+                          return null;
+                        })()}
+                        
+                        <button 
+                          onClick={() => updateRoomStatus(selectedRoom.id, 'À nettoyer')}
+                          className="w-full bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold py-2 rounded-lg transition-colors flex items-center justify-center space-x-1.5 cursor-pointer"
+                        >
+                          <LogOut size={14} />
+                          <span>Enregistrer le Check-Out</span>
+                        </button>
+                      </div>
                     )}
 
                     <div className="grid grid-cols-2 gap-2">
@@ -543,6 +536,16 @@ export default function Reception() {
         </div>
 
       </div>
+
+      {/* PRINTABLE RECEIPT MODAL INTEGRATION */}
+      {selectedReceiptData && (
+        <PrintableReceipt
+          invoice={selectedReceiptData.invoice}
+          guest={selectedReceiptData.guest}
+          reservation={selectedReceiptData.reservation}
+          onClose={() => setSelectedReceiptData(null)}
+        />
+      )}
     </div>
   );
 }

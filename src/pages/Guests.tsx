@@ -7,8 +7,7 @@ import React, { useState } from 'react';
 import { Users, Plus, Search, User, Mail, Phone, MapPin, ShieldAlert, Award, FileText, X, CalendarDays, ArrowRight, TrendingUp, DollarSign, Bed, History, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
 import { PageHeader, Badge, AlertBanner } from '../components/ui/pms-ui';
 import { mockGuests, mockReservations, mockRooms } from '../mockData';
-import { IGuest, IReservation, IRoom } from '../types';
-import { api } from '../utils/api';
+import { IGuest } from '../types';
 import { AnimatePresence, motion } from 'motion/react';
 
 export default function Guests() {
@@ -26,15 +25,6 @@ export default function Guests() {
     }
     return mockReservations;
   });
-  const [rooms, setRooms] = useState<IRoom[]>(() => {
-    const stored = localStorage.getItem('pms_rooms');
-    if (stored) {
-      try { return JSON.parse(stored); } catch (e) {}
-    }
-    return mockRooms;
-  });
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGuest, setSelectedGuest] = useState<IGuest | null>(() => {
     const stored = localStorage.getItem('pms_guests');
@@ -119,36 +109,6 @@ export default function Guests() {
     setSuccessMsg(`Le profil client de ${newGuest.first_name} ${newGuest.last_name} a été enregistré.`);
     setTimeout(() => setSuccessMsg(''), 4000);
   };
-
-  React.useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-      setLoadError(null);
-      try {
-        const [reservationsData, roomsData] = await Promise.all([
-          api.getReservations(),
-          api.getRooms()
-        ]);
-
-        if (Array.isArray(reservationsData) && reservationsData.length > 0) {
-          setReservations(reservationsData as IReservation[]);
-          localStorage.setItem('pms_reservations', JSON.stringify(reservationsData));
-        }
-
-        if (Array.isArray(roomsData) && roomsData.length > 0) {
-          setRooms(roomsData as IRoom[]);
-          localStorage.setItem('pms_rooms', JSON.stringify(roomsData));
-        }
-      } catch (error) {
-        console.error('Chargement Guests API échoué :', error);
-        setLoadError('Impossible de charger les données clients. Mode dégradé activé.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadData();
-  }, []);
 
   return (
     <div className="flex flex-col h-full">
@@ -820,7 +780,7 @@ export default function Guests() {
                     Object.entries(roomCounts).forEach(([rId, count]) => {
                       if (count > maxStays) {
                         maxStays = count;
-                        const rm = rooms.find(r => String(r.id) === String(rId));
+                        const rm = mockRooms.find(r => r.id === rId);
                         if (rm) favRoomNum = rm.room_number;
                       }
                     });
@@ -878,7 +838,7 @@ export default function Guests() {
                       return (
                         <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                           {stays.map((stay) => {
-                            const room = rooms.find(r => String(r.id) === String(stay.room_id));
+                            const room = mockRooms.find(r => r.id === stay.room_id);
                             return (
                               <div key={stay.id} className="p-3.5 bg-white border border-slate-200 rounded-xl hover:border-slate-300 transition-colors flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                                 <div className="space-y-1 text-xs">

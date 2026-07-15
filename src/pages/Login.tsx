@@ -5,48 +5,64 @@
 
 import React, { useState } from 'react';
 import { LogIn, Key, Mail, ShieldAlert } from 'lucide-react';
-import { api } from '../utils/api';
 
 interface LoginProps {
   onLoginSuccess: (user: { name: string; role: string; email: string }) => void;
 }
 
 export default function Login({ onLoginSuccess }: LoginProps) {
-  const [email, setEmail] = useState('admin@nucleus-pms.com');
-  const [password, setPassword] = useState('Admin123!');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const [hotelLogo] = useState<string | null>(() => localStorage.getItem('hotelLogo'));
+  const [hotelName] = useState<string>(() => localStorage.getItem('hotelName') || 'Brunch Bouaké');
+
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
 
-    try {
-      const res = await api.login(email.trim(), password.trim());
-      if (res.success && res.user) {
-        onLoginSuccess(res.user);
+    setTimeout(() => {
+      if (email.trim() && password.trim()) {
+        onLoginSuccess({
+          name: 'Amadou Koné',
+          role: 'Super Administrateur',
+          email: email
+        });
       } else {
-        setError(res.error?.message || 'Identifiants invalides.');
+        setError('Veuillez remplir tous les champs obligatoires.');
       }
-    } catch (err: any) {
-      setError(err.message || 'Erreur lors de la connexion.');
-    } finally {
       setIsLoading(false);
-    }
+    }, 600);
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-radial from-[#1e2022] to-[#0E0F11] px-4">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-radial from-[#1e2022] to-[#0E0F11] px-4 space-y-6">
       <div className="w-full max-w-md bg-white/95 rounded-2xl shadow-2xl overflow-hidden border border-white/20 backdrop-blur-md">
         
         {/* BRAND PROMO SECTION */}
         <div className="p-8 text-center bg-[#141517] text-white border-b border-[#232529]">
-          <div className="w-16 h-16 mx-auto rounded-2xl bg-brand-orange flex items-center justify-center font-bold text-white text-3xl shadow-lg shadow-brand-orange/30 mb-4 animate-bounce">
-            B
-          </div>
-          <h2 className="text-xl font-bold tracking-tight">Brunch Bouaké PMS</h2>
+          {hotelLogo === 'PRESET_VIP_LOGO' ? (
+            <div className="w-16 h-16 mx-auto rounded-2xl bg-slate-900 border-2 border-brand-orange/60 flex items-center justify-center font-black text-brand-orange text-3xl shadow-lg shadow-brand-orange/30 mb-4 relative">
+              B
+              <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-brand-orange animate-pulse"></span>
+            </div>
+          ) : hotelLogo ? (
+            <img 
+              src={hotelLogo} 
+              alt="Logo" 
+              className="w-16 h-16 mx-auto rounded-2xl object-contain bg-white p-1 shadow-lg border border-white/20 mb-4" 
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className="w-16 h-16 mx-auto rounded-2xl bg-brand-orange flex items-center justify-center font-bold text-white text-3xl shadow-lg shadow-brand-orange/30 mb-4 animate-bounce">
+              {hotelName ? hotelName[0].toUpperCase() : 'B'}
+            </div>
+          )}
+          <h2 className="text-xl font-bold tracking-tight">{hotelName} PMS</h2>
           <p className="text-xs text-[#A1A5B7] mt-1.5 uppercase font-semibold tracking-wider">Property Management System</p>
         </div>
 
@@ -125,17 +141,15 @@ export default function Login({ onLoginSuccess }: LoginProps) {
               )}
             </button>
           </form>
-
-          {/* QUICK CREDENTIALS PANEL */}
-          <div className="mt-8 p-3.5 bg-slate-50 border border-slate-200 rounded-lg">
-            <h4 className="text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-2">Accès rapide démonstration</h4>
-            <div className="text-[11px] text-slate-500 space-y-1">
-              <p>Email: <code className="bg-slate-200 px-1 rounded text-slate-700 font-mono font-bold">admin@nucleus-pms.com</code></p>
-              <p>Mot de passe: <code className="bg-slate-200 px-1 rounded text-slate-700 font-mono font-bold">Admin123!</code></p>
-            </div>
-          </div>
         </div>
 
+      </div>
+
+      {/* FOOTER COPYRIGHT */}
+      <div className="text-center">
+        <p className="text-xs text-slate-500 font-semibold tracking-wide">
+          &copy; {new Date().getFullYear()} Fasopost Digital <span className="text-brand-orange mx-1.5">&bull;</span> +212 777346787
+        </p>
       </div>
     </div>
   );

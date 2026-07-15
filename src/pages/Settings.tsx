@@ -35,7 +35,8 @@ import {
   Sliders,
   AlertTriangle,
   LogOut,
-  UserCheck
+  UserCheck,
+  FileText
 } from 'lucide-react';
 import { PageHeader, Badge, AlertBanner } from '../components/ui/pms-ui';
 import { 
@@ -125,6 +126,17 @@ export default function SettingsPage() {
     };
   });
 
+  // 4.1 INVOICE CUSTOMIZATION STATES
+  const [invoiceTemplate, setInvoiceTemplate] = useState(() => localStorage.getItem('invoiceTemplate') || 'modern');
+  const [invoiceShowLogo, setInvoiceShowLogo] = useState(() => localStorage.getItem('invoiceShowLogo') !== 'false');
+  const [invoiceShowIdDoc, setInvoiceShowIdDoc] = useState(() => localStorage.getItem('invoiceShowIdDoc') !== 'false');
+  const [invoiceShowBankDetails, setInvoiceShowBankDetails] = useState(() => localStorage.getItem('invoiceShowBankDetails') !== 'false');
+  const [invoiceShowSignatures, setInvoiceShowSignatures] = useState(() => localStorage.getItem('invoiceShowSignatures') !== 'false');
+  const [invoiceShowNotes, setInvoiceShowNotes] = useState(() => localStorage.getItem('invoiceShowNotes') !== 'false');
+  const [invoiceCustomNotes, setInvoiceCustomNotes] = useState(() => localStorage.getItem('invoiceCustomNotes') || "• TVA au taux de 18% appliquée sur l'ensemble des prestations assujetties.\n• Taxe de séjour hôtelière collectée pour le compte de la municipalité.\n• En cas de litige, seul le tribunal de commerce compétent est saisi.");
+  const [invoiceAvoirCustomNotes, setInvoiceAvoirCustomNotes] = useState(() => localStorage.getItem('invoiceAvoirCustomNotes') || "• Cet avoir est à valoir sur vos prochains séjours ou remboursable sous conditions.\n• Document d'annulation/rectification commerciale.");
+  const [invoiceBankDetails, setInvoiceBankDetails] = useState(() => localStorage.getItem('invoiceBankDetails') || "NSIA BANQUE CI: CI123 45678 901234567890 12\nOrange Money: +225 07 45 89 12 34\nWave Transfer: +225 07 45 89 12 34");
+
   // 5. STAFF / PERSONNEL STATES
   const [employees, setEmployees] = useState<Employee[]>(() => {
     const stored = localStorage.getItem('pms_employees');
@@ -192,6 +204,17 @@ export default function SettingsPage() {
       localStorage.setItem('touristTaxAmt', String(touristTaxAmt));
       localStorage.setItem('defaultCurrency', defaultCurrency);
       localStorage.setItem('pms_accepted_payments', JSON.stringify(paymentMethods));
+
+      // 4.1 Invoice Template Customization
+      localStorage.setItem('invoiceTemplate', invoiceTemplate);
+      localStorage.setItem('invoiceShowLogo', String(invoiceShowLogo));
+      localStorage.setItem('invoiceShowIdDoc', String(invoiceShowIdDoc));
+      localStorage.setItem('invoiceShowBankDetails', String(invoiceShowBankDetails));
+      localStorage.setItem('invoiceShowSignatures', String(invoiceShowSignatures));
+      localStorage.setItem('invoiceShowNotes', String(invoiceShowNotes));
+      localStorage.setItem('invoiceCustomNotes', invoiceCustomNotes);
+      localStorage.setItem('invoiceAvoirCustomNotes', invoiceAvoirCustomNotes);
+      localStorage.setItem('invoiceBankDetails', invoiceBankDetails);
 
       // 5. Staff Storage
       localStorage.setItem('pms_employees', JSON.stringify(employees));
@@ -571,12 +594,7 @@ export default function SettingsPage() {
               </nav>
             </div>
 
-            {/* Quick Status Info */}
-            <div className="pt-6 border-t border-slate-800 text-[10px] text-slate-500 font-semibold space-y-1 text-left hidden lg:block">
-              <p>📍 Bouaké, Côte d'Ivoire</p>
-              <p>💻 Version Locale Sandbox</p>
-              <p>📅 {new Date().toLocaleDateString('fr-FR')}</p>
-            </div>
+
           </div>
 
           {/* TAB BODY FORM */}
@@ -1129,6 +1147,191 @@ export default function SettingsPage() {
                       </label>
                     </div>
                   </div>
+
+                  {/* INVOICE & RECEIPT CUSTOMIZER PANEL */}
+                  <div className="p-5 border border-slate-200 rounded-xl bg-white space-y-6">
+                    <div className="border-b border-slate-100 pb-3">
+                      <h4 className="font-extrabold text-xs text-slate-900 flex items-center gap-1.5 uppercase tracking-wide">
+                        <FileText size={14} className="text-brand-orange" />
+                        <span>Modèles & Éléments de Facturation Client & Avoirs</span>
+                      </h4>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Personnalisez le visuel de vos factures de séjour, reçus de caisse, et factures d'avoir. Les changements s'appliquent automatiquement en temps réel.</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-5 text-xs font-semibold">
+                      {/* Template Selector */}
+                      <div className="md:col-span-1 space-y-2.5">
+                        <label className="text-slate-800 font-extrabold">Style / Gabarit Visuel (Template)</label>
+                        <p className="text-[10px] text-slate-400 font-medium">Sélectionnez le design visuel de vos documents imprimables :</p>
+                        <div className="space-y-2">
+                          <label className={`flex flex-col p-3 border rounded-xl cursor-pointer transition-all ${invoiceTemplate === 'modern' ? 'border-brand-orange bg-brand-orange/5' : 'border-slate-200 hover:border-slate-300'}`}>
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="radio"
+                                name="invoiceTemplate"
+                                value="modern"
+                                checked={invoiceTemplate === 'modern'}
+                                onChange={() => setInvoiceTemplate('modern')}
+                                className="text-brand-orange focus:ring-brand-orange"
+                              />
+                              <span className="font-extrabold text-slate-900">✨ Moderne & Élégant</span>
+                            </div>
+                            <span className="text-[10px] text-slate-400 mt-1 font-medium leading-relaxed">Dégradés subtils, badge d'état surélevé, coins de tableaux arrondis et police équilibrée.</span>
+                          </label>
+
+                          <label className={`flex flex-col p-3 border rounded-xl cursor-pointer transition-all ${invoiceTemplate === 'classic' ? 'border-brand-orange bg-brand-orange/5' : 'border-slate-200 hover:border-slate-300'}`}>
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="radio"
+                                name="invoiceTemplate"
+                                value="classic"
+                                checked={invoiceTemplate === 'classic'}
+                                onChange={() => setInvoiceTemplate('classic')}
+                                className="text-brand-orange focus:ring-brand-orange"
+                              />
+                              <span className="font-extrabold text-slate-900">💼 Classique Corporate</span>
+                            </div>
+                            <span className="text-[10px] text-slate-400 mt-1 font-medium leading-relaxed">Double ligne de séparation supérieure, style de facture d'affaires standardisé d'Afrique de l'Ouest.</span>
+                          </label>
+
+                          <label className={`flex flex-col p-3 border rounded-xl cursor-pointer transition-all ${invoiceTemplate === 'minimal' ? 'border-brand-orange bg-brand-orange/5' : 'border-slate-200 hover:border-slate-300'}`}>
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="radio"
+                                name="invoiceTemplate"
+                                value="minimal"
+                                checked={invoiceTemplate === 'minimal'}
+                                onChange={() => setInvoiceTemplate('minimal')}
+                                className="text-brand-orange focus:ring-brand-orange"
+                              />
+                              <span className="font-extrabold text-slate-900">⚙️ Minimaliste Épuré</span>
+                            </div>
+                            <span className="text-[10px] text-slate-400 mt-1 font-medium leading-relaxed">Design noir et blanc à contraste élevé, idéal pour l'impression jet d'encre directe sans fioritures.</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Elements to Include Checklist */}
+                      <div className="md:col-span-2 space-y-4">
+                        <label className="text-slate-800 font-extrabold block">Éléments visuels à inclure</label>
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <label className="flex items-center space-x-3 p-3 border border-slate-100 rounded-xl hover:bg-slate-50/50 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={invoiceShowLogo}
+                              onChange={(e) => setInvoiceShowLogo(e.target.checked)}
+                              className="rounded text-brand-orange focus:ring-brand-orange w-4.5 h-4.5"
+                            />
+                            <div>
+                              <span className="block font-bold text-slate-800 text-[11px]">Logo de l'Hôtel</span>
+                              <span className="text-[9px] text-slate-400 font-medium">Afficher l'image du logo dans l'en-tête</span>
+                            </div>
+                          </label>
+
+                          <label className="flex items-center space-x-3 p-3 border border-slate-100 rounded-xl hover:bg-slate-50/50 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={invoiceShowIdDoc}
+                              onChange={(e) => setInvoiceShowIdDoc(e.target.checked)}
+                              className="rounded text-brand-orange focus:ring-brand-orange w-4.5 h-4.5"
+                            />
+                            <div>
+                              <span className="block font-bold text-slate-800 text-[11px]">Identité Client</span>
+                              <span className="text-[9px] text-slate-400 font-medium">Afficher N° CNI / Passeport du client</span>
+                            </div>
+                          </label>
+
+                          <label className="flex items-center space-x-3 p-3 border border-slate-100 rounded-xl hover:bg-slate-50/50 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={invoiceShowBankDetails}
+                              onChange={(e) => setInvoiceShowBankDetails(e.target.checked)}
+                              className="rounded text-brand-orange focus:ring-brand-orange w-4.5 h-4.5"
+                            />
+                            <div>
+                              <span className="block font-bold text-slate-800 text-[11px]">RIB / Coordonnées Bancaires</span>
+                              <span className="text-[9px] text-slate-400 font-medium">Inclure le RIB pour virements et versements</span>
+                            </div>
+                          </label>
+
+                          <label className="flex items-center space-x-3 p-3 border border-slate-100 rounded-xl hover:bg-slate-50/50 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={invoiceShowSignatures}
+                              onChange={(e) => setInvoiceShowSignatures(e.target.checked)}
+                              className="rounded text-brand-orange focus:ring-brand-orange w-4.5 h-4.5"
+                            />
+                            <div>
+                              <span className="block font-bold text-slate-800 text-[11px]">Emplacements de Signature</span>
+                              <span className="text-[9px] text-slate-400 font-medium">Blocs de signature pour réceptionniste & client</span>
+                            </div>
+                          </label>
+
+                          <label className="flex items-center space-x-3 p-3 border border-slate-100 rounded-xl hover:bg-slate-50/50 cursor-pointer sm:col-span-2">
+                            <input
+                              type="checkbox"
+                              checked={invoiceShowNotes}
+                              onChange={(e) => setInvoiceShowNotes(e.target.checked)}
+                              className="rounded text-brand-orange focus:ring-brand-orange w-4.5 h-4.5"
+                            />
+                            <div>
+                              <span className="block font-bold text-slate-800 text-[11px]">Notes légales & Conditions de séjour</span>
+                              <span className="text-[9px] text-slate-400 font-medium">Afficher les paragraphes réglementaires de l'hôtel en bas de page</span>
+                            </div>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4 pt-2 border-t border-slate-100 text-xs font-semibold">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Custom Bank Details */}
+                        {invoiceShowBankDetails && (
+                          <div className="space-y-1 md:col-span-2">
+                            <label className="text-slate-700 flex items-center justify-between">
+                              <span>Coordonnées bancaires & Mobile Money (RIB de Facturation)</span>
+                              <span className="text-[9px] text-slate-400 font-medium">Un compte par ligne</span>
+                            </label>
+                            <textarea
+                              rows={3}
+                              value={invoiceBankDetails}
+                              onChange={(e) => setInvoiceBankDetails(e.target.value)}
+                              placeholder="Ex: NSIA BANQUE CI: CI123 45678...&#10;Wave Money: +225 07..."
+                              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs focus:border-brand-orange focus:outline-none font-mono"
+                            />
+                          </div>
+                        )}
+
+                        {/* Standard Legal Notes */}
+                        {invoiceShowNotes && (
+                          <>
+                            <div className="space-y-1">
+                              <label className="text-slate-700">Mentions légales de bas de page (Facture standard)</label>
+                              <textarea
+                                rows={4}
+                                value={invoiceCustomNotes}
+                                onChange={(e) => setInvoiceCustomNotes(e.target.value)}
+                                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs focus:border-brand-orange focus:outline-none font-medium leading-relaxed"
+                              />
+                            </div>
+
+                            {/* Credit Note Notes */}
+                            <div className="space-y-1">
+                              <label className="text-slate-700">Mentions légales de bas de page (Facture d'Avoir / Avoir commercial)</label>
+                              <textarea
+                                rows={4}
+                                value={invoiceAvoirCustomNotes}
+                                onChange={(e) => setInvoiceAvoirCustomNotes(e.target.value)}
+                                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs focus:border-brand-orange focus:outline-none font-medium leading-relaxed"
+                              />
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
                 </div>
               )}
 

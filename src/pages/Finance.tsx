@@ -8,6 +8,7 @@ import { Coins, Plus, Search, FileText, TrendingUp, Receipt, ArrowDownCircle, Sh
 import { PageHeader, Badge, AlertBanner, StatCard } from '../components/ui/pms-ui';
 import { mockInvoices, mockPayments, mockGuests, mockInvoiceItems, mockReservations } from '../mockData';
 import { IInvoice, IPayment, IInvoiceItem, IGuest, IReservation } from '../types';
+import PrintableReceipt from '../components/ui/PrintableReceipt';
 
 export default function Finance() {
   const [invoices, setInvoices] = useState<IInvoice[]>(mockInvoices);
@@ -30,6 +31,7 @@ export default function Finance() {
   const [searchQuery, setSearchQuery] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [selectedInvoice, setSelectedInvoice] = useState<IInvoice | null>(null);
+  const [selectedPayment, setSelectedPayment] = useState<IPayment | null>(null);
 
   const [currency, setCurrency] = useState<'XOF' | 'EUR'>(() => {
     return (localStorage.getItem('pms_currency') as 'XOF' | 'EUR') || 'XOF';
@@ -286,8 +288,9 @@ export default function Finance() {
                         <td className="py-3.5 px-4 font-semibold text-slate-500">{pay.cashier_id === 'usr-admin' ? 'Amadou Koné' : 'Koffi Germain'}</td>
                         <td className="py-3.5 px-6 text-right">
                           <button
-                            onClick={() => alert('Impression du justificatif client.')}
-                            className="text-slate-400 hover:text-slate-600 inline-block p-1"
+                            onClick={() => setSelectedPayment(pay)}
+                            className="text-slate-400 hover:text-brand-orange hover:bg-slate-50 inline-block p-1.5 rounded transition-colors"
+                            title="Imprimer le reçu de paiement"
                           >
                             <Printer size={13} />
                           </button>
@@ -457,243 +460,67 @@ export default function Finance() {
           </div>
         )}
 
-        {/* INVOICE DETAIL & PRINT MODAL */}
-        {selectedInvoice && (
-          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto print:p-0 print:bg-white print:static" id="invoice-modal-overlay">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col my-8 print:my-0 print:shadow-none print:rounded-none" id="invoice-modal-card">
-              
-              {/* Action Bar (hidden when printing) */}
-              <div className="p-4 bg-slate-900 text-white flex justify-between items-center print:hidden">
-                <div className="flex items-center gap-2">
-                  <FileText size={16} className="text-brand-orange" />
-                  <span className="font-bold text-xs uppercase tracking-wider">Visualisation Facture — {selectedInvoice.invoice_number}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => window.print()}
-                    className="bg-brand-orange hover:bg-brand-orange-hover text-white text-xs font-black px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer transition-colors"
-                  >
-                    <Printer size={13} />
-                    <span>Imprimer la Facture</span>
-                  </button>
-                  <button
-                    onClick={() => setSelectedInvoice(null)}
-                    className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800 transition-colors"
-                  >
-                    <X size={18} />
-                  </button>
-                </div>
-              </div>
+        {/* PRINTABLE RECEIPT MODAL INTEGRATION */}
+        {selectedInvoice && (() => {
+          const guest = guests.find(g => g.id === selectedInvoice.guest_id) || {
+            id: selectedInvoice.guest_id,
+            first_name: 'Client',
+            last_name: 'externe',
+            phone: '',
+            email: '',
+            vip: false,
+            blacklist: false,
+          } as IGuest;
+          const reservation = reservations.find(r => r.id === selectedInvoice.reservation_id);
+          return (
+            <PrintableReceipt
+              invoice={selectedInvoice}
+              guest={guest}
+              reservation={reservation}
+              onClose={() => setSelectedInvoice(null)}
+              defaultCurrency={currency}
+            />
+          );
+        })()}
 
-              {/* Print Area */}
-              <div className="p-8 md:p-12 overflow-y-auto bg-white text-left text-slate-800 print:p-0 print:overflow-visible flex-1" id="printable-invoice">
-                
-                {/* Embedded styles to guarantee flawless print formatting */}
-                <style dangerouslySetInnerHTML={{__html: `
-                  @media print {
-                    body * {
-                      visibility: hidden;
-                    }
-                    #printable-invoice, #printable-invoice * {
-                      visibility: visible;
-                    }
-                    #printable-invoice {
-                      position: absolute;
-                      left: 0;
-                      top: 0;
-                      width: 100%;
-                      padding: 0 !important;
-                      margin: 0 !important;
-                      font-size: 11px !important;
-                    }
-                    #invoice-modal-overlay {
-                      position: absolute;
-                      background: white !important;
-                      padding: 0 !important;
-                    }
-                    #invoice-modal-card {
-                      box-shadow: none !important;
-                      border: none !important;
-                      width: 100% !important;
-                      max-width: 100% !important;
-                    }
-                  }
-                `}} />
-
-                {/* Invoice Sheet Header */}
-                <div className="flex justify-between items-start border-b-2 border-slate-200 pb-6">
-                  <div className="space-y-1.5">
-                    <h1 className="text-xl font-black text-slate-900 uppercase tracking-tight">Hôtel Brunch de Bouaké</h1>
-                    <p className="text-[10px] text-slate-500 font-bold leading-normal">
-                      Quartier Commerce, Face BCEAO, Bouaké, Côte d'Ivoire<br />
-                      Tél: +225 31 63 00 00 / +225 07 07 07 07<br />
-                      Email: contact@brunchbouake.ci<br />
-                      RCCM: CI-BKE-2026-B-104 • NIF: 3024824H
-                    </p>
-                  </div>
-                  <div className="text-right space-y-1">
-                    <span className="inline-block bg-brand-orange/10 border border-brand-orange/20 text-brand-orange text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full">
-                      {selectedInvoice.status}
-                    </span>
-                    <h2 className="text-base font-black font-mono text-slate-900 mt-1">{selectedInvoice.invoice_number}</h2>
-                    <p className="text-[10px] text-slate-400 font-bold">Date : {selectedInvoice.issued_at}</p>
-                  </div>
-                </div>
-
-                {/* Client & Stay Details */}
-                <div className="grid grid-cols-2 gap-8 py-6 text-xs border-b border-slate-100">
-                  <div className="space-y-1">
-                    <h4 className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Facturé à (Client)</h4>
-                    {(() => {
-                      const guest = guests.find(g => g.id === selectedInvoice.guest_id);
-                      if (!guest) return <p className="font-bold text-slate-800">Client externe</p>;
-                      return (
-                        <div className="space-y-0.5 text-slate-600 font-semibold">
-                          <p className="font-black text-slate-900 text-sm">{guest.first_name} {guest.last_name}</p>
-                          <p>{guest.phone}</p>
-                          <p>{guest.email}</p>
-                          <p>{guest.address}</p>
-                          <p className="text-[10px] text-slate-400 font-bold mt-1">
-                            {guest.document_type} : {guest.document_number}
-                          </p>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                  
-                  <div className="space-y-1 text-right">
-                    <h4 className="text-[9px] font-black text-slate-400 uppercase tracking-widest text-right">Détails du séjour</h4>
-                    {(() => {
-                      const res = reservations.find(r => r.id === selectedInvoice.reservation_id);
-                      if (!res) return <p className="text-slate-500 font-semibold">-</p>;
-                      return (
-                        <div className="space-y-0.5 text-slate-600 font-semibold text-right">
-                          <p>Réservation : <span className="font-bold text-slate-800">{res.reservation_number}</span></p>
-                          <p>Arrivée : <span className="font-bold text-slate-800">{res.arrival_date}</span></p>
-                          <p>Départ : <span className="font-bold text-slate-800">{res.departure_date}</span></p>
-                          <p>Nuitées : <span className="font-bold text-slate-800">{res.nights} nuit(s)</span></p>
-                          <p>Chambre attribuée : <span className="font-bold text-slate-800">Chambre {res.room_id.replace('room-', '')}</span></p>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </div>
-
-                {/* Folio item rows */}
-                <div className="py-6">
-                  <h4 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2.5">Folio détaillé des prestations</h4>
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="border-b border-slate-200 text-slate-400 uppercase tracking-wider font-bold bg-slate-50">
-                        <th className="py-2 px-3">Prestation / Description</th>
-                        <th className="py-2 px-3 text-center">Qté</th>
-                        <th className="py-2 px-3 text-right">Prix Unitaire</th>
-                        <th className="py-2 px-3 text-right">TVA</th>
-                        <th className="py-2 px-3 text-right">Montant</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                      {(() => {
-                        let items = mockInvoiceItems.filter(item => item.invoice_id === selectedInvoice.id);
-                        if (items.length === 0) {
-                          const res = reservations.find(r => r.id === selectedInvoice.reservation_id);
-                          items = [{
-                            id: `dynamic-${selectedInvoice.id}`,
-                            invoice_id: selectedInvoice.id,
-                            item_type: 'Chambre',
-                            item_id: res?.room_id || 'unknown',
-                            description: `Hébergement - Chambre ${res?.room_id?.replace('room-', '') || ''} (${res?.nights || 1} nuitée(s))`,
-                            quantity: res?.nights || 1,
-                            unit_price: res?.room_rate || (selectedInvoice.subtotal / (res?.nights || 1)),
-                            tax: selectedInvoice.tax,
-                            total: selectedInvoice.subtotal
-                          }];
-                        }
-
-                        return items.map((item) => (
-                          <tr key={item.id} className="hover:bg-slate-50/20">
-                            <td className="py-3 px-3">
-                              <span className="font-bold text-slate-900 block">{item.description}</span>
-                              <span className="text-[9px] text-slate-400 uppercase tracking-wider font-black">{item.item_type}</span>
-                            </td>
-                            <td className="py-3 px-3 text-center font-mono">{item.quantity}</td>
-                            <td className="py-3 px-3 text-right font-mono">{formatAmount(item.unit_price)}</td>
-                            <td className="py-3 px-3 text-right font-mono text-slate-400">{formatAmount(item.tax * 0.4)}</td>
-                            <td className="py-3 px-3 text-right font-mono font-bold text-slate-900">{formatAmount(item.total)}</td>
-                          </tr>
-                        ));
-                      })()}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Financial Summary Breakdown */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t-2 border-slate-100 text-xs font-semibold">
-                  <div className="p-4 bg-slate-50/50 rounded-xl space-y-2 text-slate-500">
-                    <h4 className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Mentions fiscales & Règlement</h4>
-                    <p className="text-[10px] leading-normal font-medium">
-                      Conformément aux lois ivoiriennes sur la fiscalité hôtelière :<br />
-                      • TVA applicable au taux de 18%.<br />
-                      • Taxe de séjour régionale incluse de 1 000 XOF par nuitée.<br />
-                      • Règlement exigé au check-out complet.
-                    </p>
-                  </div>
-                  
-                  <div className="space-y-2 text-slate-600 pl-0 md:pl-8">
-                    <div className="flex justify-between">
-                      <span>Sous-Total HT :</span>
-                      <span className="font-mono font-bold text-slate-800">{formatAmount(selectedInvoice.subtotal)}</span>
-                    </div>
-                    {selectedInvoice.discount > 0 && (
-                      <div className="flex justify-between text-brand-orange font-bold">
-                        <span>Remise accordée (-) :</span>
-                        <span className="font-mono">- {formatAmount(selectedInvoice.discount)}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between">
-                      <span>Taxes locales (TVA + Séjour) :</span>
-                      <span className="font-mono font-bold text-slate-800">{formatAmount(selectedInvoice.tax)}</span>
-                    </div>
-                    <div className="h-px bg-slate-200"></div>
-                    <div className="flex justify-between font-black text-sm text-slate-950">
-                      <span>Total TTC à payer :</span>
-                      <span className="font-mono text-slate-950">{formatAmount(selectedInvoice.total)}</span>
-                    </div>
-                    <div className="flex justify-between text-emerald-600">
-                      <span>Montant déjà réglé :</span>
-                      <span className="font-mono font-bold">{formatAmount(selectedInvoice.paid)}</span>
-                    </div>
-                    <div className="h-0.5 bg-slate-300"></div>
-                    <div className={`flex justify-between p-2 rounded-lg ${selectedInvoice.balance <= 0 ? 'bg-emerald-50 text-emerald-700 font-black' : 'bg-rose-50 text-rose-700 font-black'}`}>
-                      <span>{selectedInvoice.balance <= 0 ? 'FACTURE ENTIÈREMENT RÉGLÉE' : 'SOLDE RESTANT DU :'}</span>
-                      <span className="font-mono">{formatAmount(selectedInvoice.balance)}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Signatures */}
-                <div className="grid grid-cols-2 gap-8 pt-12 pb-6 text-center text-xs text-slate-500 font-bold border-t border-slate-100 mt-8">
-                  <div className="space-y-12 text-center">
-                    <span className="block">Le Réceptionniste / Caissier</span>
-                    <div className="border-b border-dashed border-slate-300 mx-12"></div>
-                    <p className="text-[9px] font-black text-slate-400">Cachet & Signature</p>
-                  </div>
-                  <div className="space-y-12 text-center">
-                    <span className="block">Le Client (Pour approbation)</span>
-                    <div className="border-b border-dashed border-slate-300 mx-12"></div>
-                    <p className="text-[9px] font-black text-slate-400">Nom & Signature</p>
-                  </div>
-                </div>
-
-                {/* Footer Message */}
-                <div className="text-center pt-8 border-t border-slate-100 text-[10px] text-slate-400 font-bold">
-                  Nous vous remercions de votre confiance et espérons vous revoir très bientôt à l'Hôtel Brunch de Bouaké !
-                </div>
-
-              </div>
-            </div>
-          </div>
-        )}
+        {selectedPayment && (() => {
+          const inv = invoices.find(i => i.id === selectedPayment.invoice_id) || {
+            id: selectedPayment.invoice_id,
+            invoice_number: 'FACT-TEMP',
+            reservation_id: selectedPayment.reservation_id,
+            guest_id: 'unknown',
+            subtotal: selectedPayment.amount,
+            discount: 0,
+            tax: 0,
+            total: selectedPayment.amount,
+            paid: selectedPayment.amount,
+            balance: 0,
+            status: 'Payée',
+            issued_at: selectedPayment.payment_date
+          } as IInvoice;
+          
+          const guest = guests.find(g => g.id === inv.guest_id) || {
+            id: inv.guest_id,
+            first_name: 'Client',
+            last_name: 'Externe',
+            phone: '',
+            email: '',
+            vip: false,
+            blacklist: false,
+          } as IGuest;
+          
+          const reservation = reservations.find(r => r.id === selectedPayment.reservation_id);
+          return (
+            <PrintableReceipt
+              invoice={inv}
+              payment={selectedPayment}
+              guest={guest}
+              reservation={reservation}
+              onClose={() => setSelectedPayment(null)}
+              defaultCurrency={currency}
+            />
+          );
+        })()}
 
       </div>
     </div>

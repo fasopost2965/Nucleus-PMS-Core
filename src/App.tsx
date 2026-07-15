@@ -3,9 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { clearSession } from './utils/api';
 
 // Core layout
 import AppLayout from './components/layout/AppLayout';
@@ -34,25 +33,18 @@ interface IUser {
 }
 
 export default function App() {
-  const [user, setUser] = useState<IUser | null>(null);
-
-  useEffect(() => {
-    const storedUser = localStorage.getItem('pms_user');
-    if (storedUser) {
-      try {
-        setUser(JSON.parse(storedUser));
-      } catch (error) {
-        console.warn('Impossible de lire l’utilisateur en session', error);
-      }
-    }
-  }, []);
+  // Global authentication state (mocked for demo)
+  const [user, setUser] = useState<IUser | null>({
+    name: 'Amadou Koné',
+    role: 'Super Administrateur',
+    email: 'fasopost24@gmail.com'
+  });
 
   const handleLogin = (loggedUser: IUser) => {
     setUser(loggedUser);
   };
 
   const handleLogout = () => {
-    clearSession();
     setUser(null);
   };
 

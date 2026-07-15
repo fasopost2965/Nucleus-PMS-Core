@@ -75,30 +75,6 @@ export const api = {
   updateRoom: (id: string, data: any) => request(`/rooms/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteRoom: (id: string) => request(`/rooms/${id}`, { method: 'DELETE' }),
 
-  // Inventory API
-  getInventoryStock: async (): Promise<any[]> => {
-    const res = await request('/inventory/stock');
-    return res.stockItems || [];
-  },
-  updateStockItem: (id: string, data: any) => request(`/inventory/stock/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-
-  getSuppliers: async (): Promise<any[]> => {
-    const res = await request('/inventory/suppliers');
-    return res.suppliers || [];
-  },
-  createSupplier: (data: any) => request('/inventory/suppliers', { method: 'POST', body: JSON.stringify(data) }),
-
-  getInventoryRooms: async (): Promise<any[]> => {
-    const res = await request('/inventory/rooms');
-    return res.rooms || [];
-  },
-
-  getStockMovements: async (): Promise<any[]> => {
-    const res = await request('/inventory/movements');
-    return res.movements || [];
-  },
-  createStockMovement: (data: any) => request('/inventory/movements', { method: 'POST', body: JSON.stringify(data) }),
-
   // Guests API
   getGuests: async (): Promise<any[]> => {
     const res = await request('/guests');
@@ -114,16 +90,6 @@ export const api = {
   },
   createReservation: (data: any) => request('/reservations', { method: 'POST', body: JSON.stringify(data) }),
   checkInReservation: (id: string) => request(`/reservations/${id}/check-in`, { method: 'POST' }),
-  checkOutReservation: (id: string) => request(`/reservations/${id}/check-out`, { method: 'POST' }),
-  cancelReservation: (id: string) => request(`/reservations/${id}/cancel`, { method: 'POST' }),
-  deleteReservation: (id: string) => request(`/reservations/${id}`, { method: 'DELETE' }),
-
-  // Housekeeping API
-  getHousekeepingTasks: async (): Promise<any[]> => {
-    const res = await request('/housekeeping/tasks');
-    return res.tasks || [];
-  },
-  updateHousekeepingTask: (id: string, data: any) => request(`/housekeeping/tasks/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 
   // HRMS API
   getEmployees: async (): Promise<any[]> => {

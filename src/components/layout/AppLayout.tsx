@@ -266,7 +266,7 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
         </div>
 
         {/* SIDEBAR FOOTER / PROFILE */}
-        <div className="p-4 border-t border-white/10 bg-black/40">
+        <div className="p-4 border-t border-white/10 bg-black/40 space-y-3">
           {user && (
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
@@ -287,6 +287,12 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
               </button>
             </div>
           )}
+          
+          <div className="text-center pt-1 border-t border-white/5">
+            <p className="text-[9px] text-white/30 font-medium tracking-wide">
+              &copy; {new Date().getFullYear()} Fasopost Digital &bull; +212 777346787
+            </p>
+          </div>
         </div>
       </aside>
 

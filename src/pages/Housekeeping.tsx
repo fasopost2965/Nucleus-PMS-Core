@@ -3,12 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Sparkles, CheckSquare, Search, Filter, RefreshCw, CheckCircle2, User, HelpCircle } from 'lucide-react';
 import { PageHeader, Badge, AlertBanner } from '../components/ui/pms-ui';
 import { mockHousekeepingTasks, mockRooms, mockStockItems } from '../mockData';
-import { IHousekeepingTask, IRoom, IStockItem, THousekeepingStatus } from '../types';
-import { api } from '../utils/api';
+import { IHousekeepingTask, THousekeepingStatus } from '../types';
 import { logManualStockMovement } from '../stockService';
 
 export default function Housekeeping() {
@@ -20,7 +19,7 @@ export default function Housekeeping() {
     return mockHousekeepingTasks;
   });
 
-  const [rooms, setRooms] = useState<IRoom[]>(() => {
+  const [rooms, setRooms] = useState(() => {
     const stored = localStorage.getItem('pms_rooms');
     if (stored) {
       try { return JSON.parse(stored); } catch (e) {}
@@ -28,48 +27,18 @@ export default function Housekeeping() {
     return mockRooms;
   });
 
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState('');
 
-  useEffect(() => {
-    const loadHousekeepingData = async () => {
-      setLoading(true);
-      setLoadError(null);
-
-      try {
-        const housekeepingData = await api.getHousekeepingTasks();
-        if (Array.isArray(housekeepingData)) {
-          setTasks(housekeepingData);
-          localStorage.setItem('pms_housekeeping_tasks', JSON.stringify(housekeepingData));
-        }
-
-        const roomData = await api.getRooms();
-        if (Array.isArray(roomData) && roomData.length > 0) {
-          setRooms(roomData);
-          localStorage.setItem('pms_rooms', JSON.stringify(roomData));
-        }
-      } catch (error) {
-        console.error('Chargement Housekeeping API échoué:', error);
-        setLoadError('Impossible de charger les informations Housekeeping. Mode dégradé activé.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadHousekeepingData();
-  }, []);
-
   const triggerLinenMovement = (roomId: string) => {
-    const targetRoom = rooms.find((r) => r.id === roomId);
+    const targetRoom = rooms.find(r => r.id === roomId);
     if (!targetRoom) return;
 
     // Load stock from localStorage
-    let currentStock: IStockItem[] = [];
+    let currentStock = [];
     const storedStock = localStorage.getItem('pms_stock');
     if (storedStock) {
       try {
-        currentStock = JSON.parse(storedStock) as IStockItem[];
+        currentStock = JSON.parse(storedStock);
       } catch (e) {
         currentStock = [...mockStockItems];
       }
@@ -88,10 +57,10 @@ export default function Housekeeping() {
 
     // Check if clean stock is sufficient
     let lowStockWarning = false;
-    const cleanSheets = currentStock.find((s) => s.id === 'stk-3');
-    const cleanBedspreads = currentStock.find((s) => s.id === 'stk-5');
-    const cleanPillows = currentStock.find((s) => s.id === 'stk-6');
-    const cleanTowels = currentStock.find((s) => s.id === 'stk-7');
+    const cleanSheets = currentStock.find(s => s.id === 'stk-3');
+    const cleanBedspreads = currentStock.find(s => s.id === 'stk-5');
+    const cleanPillows = currentStock.find(s => s.id === 'stk-6');
+    const cleanTowels = currentStock.find(s => s.id === 'stk-7');
 
     if (
       (cleanSheets && cleanSheets.current_stock < sheetsQty) ||
@@ -103,7 +72,7 @@ export default function Housekeeping() {
     }
 
     // Update stock
-    const updatedStock = currentStock.map((item) => {
+    const updatedStock = currentStock.map(item => {
       switch (item.id) {
         // Clean Linen (decreases)
         case 'stk-3': return { ...item, current_stock: Math.max(0, item.current_stock - sheetsQty) };
@@ -144,60 +113,23 @@ export default function Housekeeping() {
     setTimeout(() => setSuccessMsg(''), 6000);
   };
 
-  const updateTaskStatus = async (id: string, newStatus: THousekeepingStatus) => {
-    const now = new Date().toISOString().replace('T', ' ').substring(0, 16);
-    const updatedTasks = tasks.map((t) => {
+  const updateTaskStatus = (id: string, newStatus: THousekeepingStatus) => {
+    const updatedTasks = tasks.map(t => {
       if (t.id === id) {
         return {
           ...t,
           status: newStatus,
-          completed_time: newStatus === 'Disponible' ? now : t.completed_time
+          completed_time: newStatus === 'Disponible' ? new Date().toISOString().replace('T', ' ').substring(0, 16) : t.completed_time
         };
       }
       return t;
     });
-
     setTasks(updatedTasks);
     localStorage.setItem('pms_housekeeping_tasks', JSON.stringify(updatedTasks));
-
-    try {
-      await api.updateHousekeepingTask(id, {
-        status: newStatus,
-        completedTime: newStatus === 'Disponible' ? now : undefined
-      });
-    } catch (error) {
-      console.error('Erreur de mise à jour de tâche Housekeeping :', error);
-    }
-
-    if (newStatus === 'Disponible') {
-      const task = tasks.find((t) => t.id === id);
-      if (task) {
-        const updatedRooms = rooms.map((r): IRoom =>
-          r.id === task.room_id ? { ...r, housekeeping_status: 'Disponible' as THousekeepingStatus } : r
-        );
-        setRooms(updatedRooms);
-        localStorage.setItem('pms_rooms', JSON.stringify(updatedRooms));
-
-        try {
-          await api.updateRoom(task.room_id, { housekeeping_status: 'Disponible' });
-        } catch (error) {
-          console.error('Erreur de mise à jour du statut de chambre :', error);
-        }
-      }
-    }
   };
-
-  const cleanedRoomsCount = rooms.filter((r) => r.housekeeping_status === 'Disponible').length;
-  const housekeepingProgress = rooms.length ? Math.round((cleanedRoomsCount / rooms.length) * 100) : 0;
-  const housekeepingProgressWidth = rooms.length ? (cleanedRoomsCount / rooms.length) * 100 : 0;
 
   const getRoomNum = (roomId: string) => {
-    return rooms.find((r) => r.id === roomId)?.room_number || '-';
-  };
-
-  const handleValidateTask = (task: IHousekeepingTask) => {
-    updateTaskStatus(task.id, 'Disponible');
-    triggerLinenMovement(task.room_id);
+    return rooms.find(r => r.id === roomId)?.room_number || '-';
   };
 
   return (
@@ -211,9 +143,6 @@ export default function Housekeeping() {
         {successMsg && (
           <AlertBanner text={successMsg} type="success" />
         )}
-        {loadError && (
-          <AlertBanner text={loadError} type="warning" />
-        )}
 
         {/* SUMMARY PROGRESS BAR */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -221,13 +150,13 @@ export default function Housekeeping() {
             <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">État Global Propreté</h4>
             <div className="space-y-2">
               <div className="flex justify-between text-xs font-bold text-slate-700">
-                <span>Propre & Prête : {cleanedRoomsCount} / {rooms.length}</span>
-                <span>{housekeepingProgress}%</span>
+                <span>Propre & Prête : {rooms.filter(r => r.housekeeping_status === 'Disponible').length} / {rooms.length}</span>
+                <span>{Math.round((rooms.filter(r => r.housekeeping_status === 'Disponible').length / rooms.length) * 100)}%</span>
               </div>
               <div className="w-full bg-slate-100 rounded-full h-2">
                 <div 
                   className="bg-emerald-500 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${housekeepingProgressWidth}%` }}
+                  style={{ width: `${(rooms.filter(r => r.housekeeping_status === 'Disponible').length / rooms.length) * 100}%` }}
                 ></div>
               </div>
             </div>
@@ -299,7 +228,14 @@ export default function Housekeeping() {
                       )}
                       {task.status === 'Contrôle' && (
                         <button
-                          onClick={() => handleValidateTask(task)}
+                          onClick={() => {
+                            updateTaskStatus(task.id, 'Disponible');
+                            // Sync rooms state & save to localstorage
+                            const updatedRooms = rooms.map(r => r.id === task.room_id ? { ...r, housekeeping_status: 'Disponible' } : r);
+                            setRooms(updatedRooms);
+                            localStorage.setItem('pms_rooms', JSON.stringify(updatedRooms));
+                            triggerLinenMovement(task.room_id);
+                          }}
                           className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-[10px] px-2.5 py-1 rounded cursor-pointer"
                         >
                           Valider (Propre)

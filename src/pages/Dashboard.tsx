@@ -31,10 +31,11 @@ import {
 import { StatCard, AlertBanner } from '../components/ui/pms-ui';
 import { mockRooms, mockReservations, mockActivityLogs, mockGuests } from '../mockData';
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { getRoomsList, getStock } from '../stockService';
+import { getRoomsList, getStock, logManualStockMovement } from '../stockService';
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const [hotelName] = useState(() => localStorage.getItem('hotelName') || 'Brunch Bouaké');
   const [rooms, setRooms] = useState(() => getRoomsList());
   const [stock, setStock] = useState(() => getStock());
   const [reservations, setReservations] = useState(() => {
@@ -196,7 +197,7 @@ export default function Dashboard() {
       <div className="flex flex-col md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Tableau de bord principal</h1>
-          <p className="text-xs text-slate-500 mt-1">Brunch Bouaké PMS • Vue d'ensemble en temps réel de votre établissement</p>
+          <p className="text-xs text-slate-500 mt-1">{hotelName} PMS • Vue d'ensemble en temps réel de votre établissement</p>
         </div>
         <div className="flex items-center space-x-2 mt-4 md:mt-0 bg-white p-1.5 rounded-lg border border-slate-200">
           <Calendar size={14} className="text-slate-500 ml-1.5" />
@@ -244,56 +245,28 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* QUICK STATUS UPDATE WIDGET */}
-      <div id="operational-summary-widget" className="bg-slate-900 text-white rounded-xl p-5 border border-slate-800 shadow-md flex flex-col md:flex-row justify-between items-stretch gap-6">
-        <div className="flex flex-col justify-between space-y-2 max-w-md">
-          <div>
-            <div className="flex items-center space-x-2 text-brand-orange">
-              <Sparkles size={16} />
-              <span className="text-[10px] font-extrabold uppercase tracking-wider text-orange-400">Suivi Logistique PMS</span>
-            </div>
-            <h2 className="text-base font-extrabold tracking-tight mt-1">Supervision de l'Entretien & Blanchisserie</h2>
-            <p className="text-xs text-slate-400 mt-1">
-              Ce module surveille en temps réel l'entretien des chambres en coordination étroite avec la rotation des stocks de linge sale de la buanderie.
-            </p>
-          </div>
-          <div className="text-[10px] text-slate-500 bg-slate-950 px-2 py-1 rounded border border-slate-800/60 font-mono w-fit">
-            Source : Stockage local (pms_rooms & pms_stock)
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
-          {/* Maintenance Rooms Stat Card */}
-          <button 
-            onClick={() => navigate('/maintenance')}
-            className="text-left bg-slate-950 p-4 rounded-lg border border-slate-800 hover:border-red-500/50 transition-all flex items-center space-x-4 cursor-pointer group"
-          >
-            <div className="p-3 rounded-lg bg-red-950/40 text-red-400 border border-red-900/40 group-hover:bg-red-900/30 transition-all">
-              <Wrench size={20} />
-            </div>
+      {/* COMPACT LOGISTICS / BLANCHISSERIE ALERT STRIP */}
+      {pendingLaundryCount > 0 && (
+        <div className="bg-amber-50/70 border border-amber-200/60 rounded-xl p-3.5 flex flex-col sm:flex-row justify-between items-center text-xs gap-3 text-left">
+          <div className="flex items-center space-x-2.5">
+            <span className="p-1.5 bg-amber-500/10 text-amber-600 rounded-lg animate-pulse">
+              <RotateCw size={14} className="animate-spin-slow" />
+            </span>
             <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Chambres en Maintenance</p>
-              <h4 className="text-2xl font-extrabold text-white mt-0.5">{maintenanceRooms}</h4>
-              <p className="text-[9px] text-slate-500 mt-0.5 group-hover:text-red-400 underline transition-all">Accéder à la Maintenance →</p>
+              <span className="font-bold text-slate-800">Alerte de linge sale en attente :</span>
+              <span className="text-slate-600 ml-1">
+                Il y a <strong className="text-amber-700 font-extrabold">{pendingLaundryCount} pièces</strong> de linge sale en buanderie nécessitant d'être lavées.
+              </span>
             </div>
-          </button>
-
-          {/* Pending Laundry Workload Stat Card */}
-          <button 
-            onClick={() => navigate('/inventory')}
-            className="text-left bg-slate-950 p-4 rounded-lg border border-slate-800 hover:border-indigo-500/50 transition-all flex items-center space-x-4 cursor-pointer group"
+          </div>
+          <button
+            onClick={() => navigate('/inventory', { state: { tab: 'lingerie' } })}
+            className="w-full sm:w-auto bg-white hover:bg-slate-50 text-slate-700 font-bold px-3 py-1.5 rounded-lg border border-slate-200 shadow-xs cursor-pointer flex items-center justify-center space-x-1 flex-shrink-0"
           >
-            <div className="p-3 rounded-lg bg-indigo-950/40 text-indigo-400 border border-indigo-900/40 group-hover:bg-indigo-900/30 transition-all">
-              <RotateCw className="animate-spin-slow" size={20} style={{ animationDuration: '6s' }} />
-            </div>
-            <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Linge Sale en Buanderie</p>
-              <h4 className="text-2xl font-extrabold text-white mt-0.5">{pendingLaundryCount} pièces</h4>
-              <p className="text-[9px] text-slate-500 mt-0.5 group-hover:text-indigo-400 underline transition-all">Gérer l'inventaire linge →</p>
-            </div>
+            <span>Lancer la machine dans les Stocks ➔</span>
           </button>
         </div>
-      </div>
+      )}
 
       {/* WIDGETS AND CHARTS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -649,6 +622,7 @@ export default function Dashboard() {
           </div>
         )}
       </AnimatePresence>
+
 
       {/* CLÔTURE CAISSE MODAL */}
       <AnimatePresence>
@@ -1142,7 +1116,7 @@ export default function Dashboard() {
                 {/* Footer buttons */}
                 <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row justify-between items-center gap-3">
                   <div className="text-[11px] text-slate-500 font-medium">
-                    Mise à jour : En temps réel • Établissement : Brunch Bouaké
+                    Mise à jour : En temps réel • Établissement : {hotelName}
                   </div>
                   <div className="flex space-x-2 w-full sm:w-auto">
                     <button
