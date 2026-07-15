@@ -91,6 +91,13 @@ export const api = {
   createReservation: (data: any) => request('/reservations', { method: 'POST', body: JSON.stringify(data) }),
   checkInReservation: (id: string) => request(`/reservations/${id}/check-in`, { method: 'POST' }),
 
+  // Maintenance API
+  getMaintenanceTickets: async (): Promise<any[]> => {
+    const res = await request('/maintenance/tickets');
+    return res.tickets || [];
+  },
+  createMaintenanceTicket: (data: any) => request('/maintenance/tickets', { method: 'POST', body: JSON.stringify(data) }),
+
   // HRMS API
   getEmployees: async (): Promise<any[]> => {
     const res = await request('/hrms/employees');

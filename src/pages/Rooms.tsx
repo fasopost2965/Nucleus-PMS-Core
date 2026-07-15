@@ -57,6 +57,18 @@ export default function Rooms() {
       } catch (e) {
         console.warn('Reservations API fallback:', e);
       }
+      try {
+        const loadedHousekeeping = await api.getHousekeepingTasks();
+        if (loadedHousekeeping && loadedHousekeeping.length > 0) setHousekeepingTasks(loadedHousekeeping);
+      } catch (e) {
+        console.warn('Housekeeping API fallback:', e);
+      }
+      try {
+        const loadedMaintenance = await api.getMaintenanceTickets();
+        if (loadedMaintenance && loadedMaintenance.length > 0) setMaintenanceTickets(loadedMaintenance);
+      } catch (e) {
+        console.warn('Maintenance API fallback:', e);
+      }
     };
     loadAllData();
   }, []);

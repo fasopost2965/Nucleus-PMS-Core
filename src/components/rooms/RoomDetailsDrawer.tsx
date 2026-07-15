@@ -37,7 +37,10 @@ export default function RoomDetailsDrawer({
   // Find related operational data
   const currentReservations = reservations.filter(r => r.room_id === room.id);
   const activeReservation = currentReservations.find(r => r.status === 'En séjour');
-  const futureReservations = currentReservations.filter(r => r.status === 'Confirmée');
+  const futureReservations = currentReservations
+    .filter(r => r.status === 'Confirmée')
+    .sort((a, b) => a.arrival_date.localeCompare(b.arrival_date));
+  const nextReservation = futureReservations[0] || null;
   const activeGuest = activeReservation ? guests.find(g => g.id === activeReservation.guest_id) : null;
   
   const currentHousekeeping = housekeepingTasks.find(h => h.room_id === room.id);
@@ -291,6 +294,39 @@ export default function RoomDetailsDrawer({
                 ) : (
                   <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 text-center text-xs text-slate-500 font-semibold py-8">
                     Aucun séjour actif n'est en cours dans cette chambre actuellement.
+                  </div>
+                )}
+              </div>
+
+              {/* Upcoming reservation */}
+              <div className="space-y-2">
+                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Réservation à venir</h4>
+                {nextReservation ? (
+                  <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <span className="text-[9px] font-black uppercase tracking-wider text-orange-500 block">Prochaine arrivée</span>
+                        <h4 className="text-sm font-black text-slate-900 mt-0.5">{nextReservation.reservation_number}</h4>
+                        <p className="text-[10px] text-slate-500">Chambre {room.room_number} • {nextReservation.adults} adultes</p>
+                      </div>
+                      <span className="bg-orange-50 border border-orange-100 text-[10px] font-black px-2 py-0.5 text-orange-700 rounded">
+                        Confirmée
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-100 text-[10px] text-slate-500">
+                      <div>
+                        <span className="block font-bold text-slate-400">Arrivée</span>
+                        <span className="block text-slate-800 mt-1">{nextReservation.arrival_date}</span>
+                      </div>
+                      <div>
+                        <span className="block font-bold text-slate-400">Départ</span>
+                        <span className="block text-slate-800 mt-1">{nextReservation.departure_date}</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 text-center text-xs text-slate-500 font-semibold py-8">
+                    Aucune réservation confirmée à venir sur cette chambre.
                   </div>
                 )}
               </div>
