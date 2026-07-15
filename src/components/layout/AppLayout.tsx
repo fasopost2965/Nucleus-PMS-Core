@@ -305,7 +305,7 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
       )}
 
       {/* MAIN CONTAINER */}
-      <div className="flex-1 flex flex-col min-w-0 max-w-full md:max-h-screen overflow-hidden">
+      <div className="flex-1 flex flex-col min-w-0 max-w-full overflow-hidden">
         {/* HEADER */}
         <header className="h-16 bg-black/70 backdrop-blur-[12px] border-b border-white/10 flex items-center justify-between px-4 md:px-8 flex-shrink-0 shadow-md z-30 text-white animate-fade-in">
           <div className="flex items-center space-x-4">

@@ -33,12 +33,8 @@ interface IUser {
 }
 
 export default function App() {
-  // Global authentication state (mocked for demo)
-  const [user, setUser] = useState<IUser | null>({
-    name: 'Amadou Koné',
-    role: 'Super Administrateur',
-    email: 'fasopost24@gmail.com'
-  });
+  // Global authentication state — null = non connecté, affiche le login
+  const [user, setUser] = useState<IUser | null>(null);
 
   const handleLogin = (loggedUser: IUser) => {
     setUser(loggedUser);
