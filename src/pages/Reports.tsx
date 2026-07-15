@@ -48,9 +48,26 @@ export default function Reports() {
     endTime: string;
     hours: number;
     status: string;
+    motif?: string;
   }[]>(() => {
     try {
       return JSON.parse(localStorage.getItem('pms_timesheet_history') || '[]');
+    } catch (e) {
+      return [];
+    }
+  });
+
+  // Load connection logs (actual logins/logouts)
+  const [connectionLogs] = useState<{
+    id: string;
+    userName: string;
+    userEmail: string;
+    role: string;
+    timestamp: string;
+    type: string;
+  }[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('pms_connection_journal') || '[]');
     } catch (e) {
       return [];
     }
@@ -63,6 +80,10 @@ export default function Reports() {
     log => log.userEmail.toLowerCase().trim() === currentUser.email.toLowerCase().trim()
   );
   const totalPersonalHours = personalLogs.reduce((sum, log) => sum + log.hours, 0);
+
+  const personalConnLogs = connectionLogs.filter(
+    log => log.userEmail.toLowerCase().trim() === currentUser.email.toLowerCase().trim()
+  );
 
   const triggerExport = (format: 'pdf' | 'excel' | 'csv') => {
     if (isPurged) {
@@ -82,6 +103,13 @@ export default function Reports() {
 
   // Filter global timesheet logs
   const filteredGlobalLogs = timesheetHistory.filter(log => {
+    if (!employeeFilter) return true;
+    const term = employeeFilter.toLowerCase();
+    return log.userName.toLowerCase().includes(term) || log.userEmail.toLowerCase().includes(term);
+  });
+
+  // Filter global connection logs
+  const filteredGlobalConnLogs = connectionLogs.filter(log => {
     if (!employeeFilter) return true;
     const term = employeeFilter.toLowerCase();
     return log.userName.toLowerCase().includes(term) || log.userEmail.toLowerCase().includes(term);
@@ -306,12 +334,50 @@ export default function Reports() {
                           <span className="bg-emerald-50 text-emerald-600 border border-emerald-100 text-[10px] font-black px-2 py-0.5 rounded-full block text-center">
                             {log.hours}h ({Math.round(log.hours * 60)} min)
                           </span>
+                          {log.motif && (
+                            <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 bg-amber-50 text-amber-600 border border-amber-100 rounded block text-center">
+                              {log.motif}
+                            </span>
+                          )}
                           <span className="text-[8px] text-slate-400 font-bold block">Validé • Auto-Calculé</span>
                         </div>
                       </div>
                     ))}
                   </div>
                 )}
+
+                {/* Personal Security Login/Logout Connection Logs */}
+                <div className="border-t border-slate-100 pt-4 mt-4">
+                  <h4 className="font-bold text-slate-700 text-xs mb-3 flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Journal de mes accès hôteliers (Login/Logout)</span>
+                  </h4>
+                  {personalConnLogs.length === 0 ? (
+                    <div className="py-6 text-center text-slate-400 text-[10px] font-semibold bg-slate-50/50 rounded-lg border border-dashed border-slate-200">
+                      Aucune activité de connexion enregistrée.
+                    </div>
+                  ) : (
+                    <div className="overflow-y-auto max-h-[200px] space-y-1.5 pr-1">
+                      {personalConnLogs.map((cLog) => (
+                        <div key={cLog.id} className="p-2 bg-slate-50 rounded-lg border border-slate-100 flex justify-between items-center text-[10px]">
+                          <div className="space-y-0.5">
+                            <span className="font-bold text-slate-800">{cLog.timestamp}</span>
+                            <span className="text-[8px] text-slate-400 block">{cLog.role}</span>
+                          </div>
+                          <span className={`px-1.5 py-0.5 font-bold rounded-md uppercase text-[8px] ${
+                            cLog.type.includes('Inactivité') 
+                              ? 'bg-amber-50 text-amber-600 border border-amber-100'
+                              : cLog.type.includes('Déconnexion')
+                                ? 'bg-red-50 text-red-600 border border-red-100'
+                                : 'bg-emerald-50 text-emerald-600 border border-emerald-100'
+                          }`}>
+                            {cLog.type}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* SECTION B: RAPPORT GLOBAL DES CONNEXIONS (ADMIN VIEW OR READ-ONLY LIST) */}
@@ -368,7 +434,12 @@ export default function Reports() {
                               </div>
                             </td>
                             <td className="py-2 px-2 text-right">
-                              <span className="font-bold text-slate-900 font-mono">{log.hours}h</span>
+                              <span className="font-bold text-slate-900 font-mono block">{log.hours}h</span>
+                              {log.motif && (
+                                <span className="inline-block text-[8px] font-extrabold uppercase px-1.5 py-0.5 bg-amber-50 text-amber-600 border border-amber-100 rounded mt-0.5">
+                                  {log.motif}
+                                </span>
+                              )}
                             </td>
                           </tr>
                         ))}
@@ -376,6 +447,39 @@ export default function Reports() {
                     </table>
                   </div>
                 )}
+
+                {/* Global Security Login/Logout Connection Logs */}
+                <div className="border-t border-slate-100 pt-4 mt-4">
+                  <h4 className="font-bold text-slate-700 text-xs mb-3 flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Journal Global des Connexions / Déconnexions</span>
+                  </h4>
+                  {filteredGlobalConnLogs.length === 0 ? (
+                    <div className="py-6 text-center text-slate-400 text-[10px] font-semibold bg-slate-50/50 rounded-lg border border-dashed border-slate-200">
+                      Aucune activité globale de connexion enregistrée.
+                    </div>
+                  ) : (
+                    <div className="overflow-y-auto max-h-[200px] space-y-1.5 pr-1">
+                      {filteredGlobalConnLogs.map((cLog) => (
+                        <div key={cLog.id} className="p-2 bg-slate-50 rounded-lg border border-slate-100 flex justify-between items-center text-[10px]">
+                          <div>
+                            <span className="font-bold text-slate-800 block">{cLog.userName}</span>
+                            <span className="text-[8px] text-slate-400 block">{cLog.userEmail} • {cLog.timestamp}</span>
+                          </div>
+                          <span className={`px-1.5 py-0.5 font-bold rounded-md uppercase text-[8px] shrink-0 ${
+                            cLog.type.includes('Inactivité') 
+                              ? 'bg-amber-50 text-amber-600 border border-amber-100'
+                              : cLog.type.includes('Déconnexion')
+                                ? 'bg-red-50 text-red-600 border border-red-100'
+                                : 'bg-emerald-50 text-emerald-600 border border-emerald-100'
+                          }`}>
+                            {cLog.type}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
             </div>

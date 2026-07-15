@@ -28,6 +28,8 @@ import Settings from './pages/Settings';
 import Admin from './pages/Admin';
 import HRMS from './pages/HRMS';
 
+import { useTimesheetLog } from './hooks/useTimesheetLog';
+
 interface IUser {
   name: string;
   role: string;
@@ -35,6 +37,8 @@ interface IUser {
 }
 
 export default function App() {
+  const { logLogin, logLogout } = useTimesheetLog();
+
   // Global authentication state, checking localStorage first
   const [user, setUser] = useState<IUser | null>(() => {
     const saved = localStorage.getItem('pms_user');
@@ -49,11 +53,23 @@ export default function App() {
   });
 
   const handleLogin = (loggedUser: IUser) => {
+    logLogin({
+      name: loggedUser.name,
+      email: loggedUser.email,
+      role: loggedUser.role
+    });
     setUser(loggedUser);
     localStorage.setItem('pms_user', JSON.stringify(loggedUser));
   };
 
   const handleLogout = () => {
+    if (user) {
+      logLogout({
+        name: user.name,
+        email: user.email,
+        role: user.role
+      });
+    }
     setUser(null);
     localStorage.removeItem('pms_user');
   };

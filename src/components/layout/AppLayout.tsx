@@ -35,7 +35,8 @@ import {
   Globe,
   Briefcase,
   Pin,
-  Lock
+  Lock,
+  Play
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { hasPermission } from '../../utils/permissions';
@@ -52,6 +53,8 @@ interface AppLayoutProps {
 }
 
 export default function AppLayout({ children, user, onLogout }: AppLayoutProps) {
+  const isAdmin = user && (user.role === 'Administrateur' || user.role === 'Super Administrateur');
+  const isPaused = user ? localStorage.getItem('pms_last_logout_motif_' + user.email) === 'Pause' : false;
   const location = useLocation();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -68,8 +71,91 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
   // Timesheet tracker state
   const [timesheetActive, setTimesheetActive] = useState(() => localStorage.getItem('pms_timesheet_active') === 'true');
   const [timesheetStart, setTimesheetStart] = useState(() => Number(localStorage.getItem('pms_timesheet_start_time') || '0'));
-  const [timesheetRequired, setTimesheetRequired] = useState(() => localStorage.getItem('pms_timesheet_required') === 'true');
+  const [timesheetRequired, setTimesheetRequired] = useState(() => {
+    const userEmail = localStorage.getItem('pms_user') ? JSON.parse(localStorage.getItem('pms_user') || '{}').email : '';
+    if (!userEmail) return false;
+    const employeesStr = localStorage.getItem('pms_employees');
+    if (employeesStr) {
+      try {
+        const list = JSON.parse(employeesStr);
+        const match = list.find((e: any) => e.email.toLowerCase().trim() === userEmail.toLowerCase().trim());
+        if (match) {
+          return match.timesheet_required !== false;
+        }
+      } catch (e) {}
+    }
+    return false;
+  });
   const [elapsedText, setElapsedText] = useState('00:00:00');
+  
+  // Logout Blocker State
+  const [showLogoutBlockerModal, setShowLogoutBlockerModal] = useState(false);
+  const [selectedMotif, setSelectedMotif] = useState<'Fin de service' | 'Pause' | 'Reconnexion' | ''>('');
+  const [resumePauseReason, setResumePauseReason] = useState<string>('Break');
+  const [forceOverlayDueToTermination, setForceOverlayDueToTermination] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    
+    // Check if we are starting a fresh session
+    const isNewSession = !sessionStorage.getItem('pms_tab_active');
+    const wasActive = localStorage.getItem('pms_timesheet_active') === 'true';
+    const wasPaused = localStorage.getItem('pms_last_logout_motif_' + user.email) === 'Pause';
+
+    // If timesheet was still 'active' or 'paused' but we had a session/browser termination (new tab/restart)
+    if (isNewSession && (wasActive || wasPaused)) {
+      localStorage.setItem('pms_unexpected_termination', 'true');
+    }
+
+    sessionStorage.setItem('pms_tab_active', 'true');
+  }, [user]);
+
+  // Periodically validate active timesheet status (every 5 seconds)
+  useEffect(() => {
+    if (!user) return;
+    
+    const interval = setInterval(() => {
+      const wasActive = localStorage.getItem('pms_timesheet_active') === 'true';
+      const wasPaused = localStorage.getItem('pms_last_logout_motif_' + user.email) === 'Pause';
+      
+      // If the app is active, let's also assert the unexpected termination flag is false
+      if (wasActive && !localStorage.getItem('pms_unexpected_termination')) {
+        // Keeps validation clean
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [user]);
+
+  // Upon next interaction, if unexpected termination is flagged, force-redirect to timesheet overlay
+  useEffect(() => {
+    if (!user) return;
+    
+    const handleNextInteraction = () => {
+      const wasActive = localStorage.getItem('pms_timesheet_active') === 'true';
+      const wasPaused = localStorage.getItem('pms_last_logout_motif_' + user.email) === 'Pause';
+      const hasTermination = localStorage.getItem('pms_unexpected_termination') === 'true';
+      
+      if (hasTermination && (wasActive || wasPaused)) {
+        setForceOverlayDueToTermination(true);
+        // Turn timesheet off to force clocking back in
+        if (wasActive) {
+          localStorage.removeItem('pms_timesheet_active');
+          localStorage.removeItem('pms_timesheet_start_time');
+          setTimesheetActive(false);
+          // Dispatch event to sync across components
+          window.dispatchEvent(new Event('pms-timesheet-changed'));
+        }
+      }
+    };
+
+    window.addEventListener('click', handleNextInteraction, { capture: true });
+    window.addEventListener('keydown', handleNextInteraction, { capture: true });
+    return () => {
+      window.removeEventListener('click', handleNextInteraction, { capture: true });
+      window.removeEventListener('keydown', handleNextInteraction, { capture: true });
+    };
+  }, [user]);
 
   useEffect(() => {
     // Check if auto-lock is enabled
@@ -110,11 +196,99 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
     };
   }, [user, isLocked]);
 
+  // Idle Timer Auto-Logout at 15 minutes of complete inactivity
+  useEffect(() => {
+    if (!user) return;
+
+    const logoutTimeoutMs = 15 * 60 * 1000; // 15 minutes
+    let logoutTimer: NodeJS.Timeout;
+
+    const resetLogoutTimer = () => {
+      clearTimeout(logoutTimer);
+      logoutTimer = setTimeout(() => {
+        // Automatically save active timesheet session before logout
+        if (localStorage.getItem('pms_timesheet_active') === 'true') {
+          const tStart = Number(localStorage.getItem('pms_timesheet_start_time') || '0');
+          if (tStart) {
+            const durationMs = Date.now() - tStart;
+            const hours = (durationMs / (1000 * 60 * 60)).toFixed(2);
+            const historyStr = localStorage.getItem('pms_timesheet_history') || '[]';
+            try {
+              const history = JSON.parse(historyStr);
+              history.unshift({
+                id: `ts-${Date.now()}`,
+                userEmail: user.email,
+                userName: user.name,
+                startTime: new Date(tStart).toLocaleString('fr-FR'),
+                endTime: new Date().toLocaleString('fr-FR'),
+                hours: Number(hours),
+                status: 'Validé'
+              });
+              localStorage.setItem('pms_timesheet_history', JSON.stringify(history));
+            } catch (e) {}
+          }
+          localStorage.removeItem('pms_timesheet_active');
+          localStorage.removeItem('pms_timesheet_start_time');
+          window.dispatchEvent(new Event('pms-timesheet-changed'));
+        }
+        
+        // Log user connection timestamp inside general connections journal (as a logout entry)
+        const connLogs = JSON.parse(localStorage.getItem('pms_connection_journal') || '[]');
+        connLogs.unshift({
+          id: `conn-${Date.now()}`,
+          userName: user.name,
+          userEmail: user.email,
+          role: user.role,
+          timestamp: new Date().toLocaleString('fr-FR'),
+          type: 'Déconnexion (Inactivité)',
+        });
+        localStorage.setItem('pms_connection_journal', JSON.stringify(connLogs));
+
+        // Call the parent log out handler
+        onLogout();
+      }, logoutTimeoutMs);
+    };
+
+    const events = ['mousemove', 'keydown', 'mousedown', 'touchstart', 'scroll'];
+    const handleUserActivity = () => {
+      resetLogoutTimer();
+    };
+
+    events.forEach(event => {
+      window.addEventListener(event, handleUserActivity);
+    });
+
+    resetLogoutTimer();
+
+    return () => {
+      clearTimeout(logoutTimer);
+      events.forEach(event => {
+        window.removeEventListener(event, handleUserActivity);
+      });
+    };
+  }, [user, onLogout]);
+
   useEffect(() => {
     const syncTimesheet = () => {
       setTimesheetActive(localStorage.getItem('pms_timesheet_active') === 'true');
       setTimesheetStart(Number(localStorage.getItem('pms_timesheet_start_time') || '0'));
-      setTimesheetRequired(localStorage.getItem('pms_timesheet_required') === 'true');
+      
+      const loggedInStr = localStorage.getItem('pms_user');
+      if (loggedInStr) {
+        try {
+          const u = JSON.parse(loggedInStr);
+          const employeesStr = localStorage.getItem('pms_employees');
+          if (employeesStr) {
+            const list = JSON.parse(employeesStr);
+            const match = list.find((e: any) => e.email.toLowerCase().trim() === u.email.toLowerCase().trim());
+            if (match) {
+              setTimesheetRequired(match.timesheet_required !== false);
+              return;
+            }
+          }
+        } catch (e) {}
+      }
+      setTimesheetRequired(false);
     };
 
     window.addEventListener('pms-timesheet-changed', syncTimesheet);
@@ -145,7 +319,7 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
     return () => clearInterval(interval);
   }, [timesheetActive, timesheetStart]);
 
-  const handleToggleTimesheet = () => {
+  const handleToggleTimesheet = (motif?: string, pauseReason?: string) => {
     if (timesheetActive) {
       // Save to timesheet history before stopping
       const durationMs = Date.now() - timesheetStart;
@@ -160,7 +334,8 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
           startTime: new Date(timesheetStart).toLocaleString('fr-FR'),
           endTime: new Date().toLocaleString('fr-FR'),
           hours: Number(hours),
-          status: 'Validé'
+          status: 'Validé',
+          motif: motif || 'Fin de service'
         });
         localStorage.setItem('pms_timesheet_history', JSON.stringify(history));
       } catch (e) {}
@@ -172,11 +347,40 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
       const now = Date.now();
       localStorage.setItem('pms_timesheet_active', 'true');
       localStorage.setItem('pms_timesheet_start_time', now.toString());
+      if (user?.email) {
+        localStorage.removeItem('pms_last_logout_motif_' + user.email);
+      }
+
+      if (pauseReason) {
+        const historyStr = localStorage.getItem('pms_timesheet_history') || '[]';
+        try {
+          const history = JSON.parse(historyStr);
+          const latestPauseIndex = history.findIndex((h: any) => 
+            h.userEmail === user?.email && h.motif === 'Pause'
+          );
+          if (latestPauseIndex !== -1) {
+            history[latestPauseIndex].motif = `Pause (${pauseReason === 'Break' ? 'Break' : pauseReason === 'Meeting' ? 'Meeting' : 'Personal'})`;
+            localStorage.setItem('pms_timesheet_history', JSON.stringify(history));
+          }
+        } catch (e) {}
+      }
+
       setTimesheetStart(now);
       setTimesheetActive(true);
+      localStorage.removeItem('pms_unexpected_termination');
+      setForceOverlayDueToTermination(false);
     }
     // Dispatch event to inform other active tabs or pages
     window.dispatchEvent(new Event('pms-timesheet-changed'));
+  };
+
+  const handleManualLogout = () => {
+    if (timesheetActive) {
+      setSelectedMotif('');
+      setShowLogoutBlockerModal(true);
+    } else {
+      onLogout();
+    }
   };
 
   const handleUnlock = (e: React.FormEvent) => {
@@ -222,6 +426,8 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
     localStorage.setItem('pms_currency', newCurrency);
     window.dispatchEvent(new Event('pms-currency-changed'));
   };
+
+  const navigationDisabled = user && !isAdmin && !timesheetActive;
 
   const menuItems = [
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -319,17 +525,7 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
           </div>
         </div>
 
-        {/* CURRENT CONTEXT MINI WIDGET */}
-        <div className="px-5 py-4 border-b border-white/10 bg-black/20 text-xs flex justify-between items-center">
-          <div className="flex items-center space-x-2">
-            <Clock size={13} className="text-brand-orange" />
-            <span className="font-mono text-white text-[11px]">{currentHour} Bouaké</span>
-          </div>
-          <div className="flex items-center space-x-1 bg-white/10 px-2 py-0.5 rounded text-[10px] text-white">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block mr-1"></span>
-            LIVE
-          </div>
-        </div>
+
 
         {/* NAVIGATION MENUS */}
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-6">
@@ -340,6 +536,20 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
                 {allowedOperations.map((item) => {
                   const isActive = location.pathname === item.path;
                   const Icon = item.icon;
+                  if (navigationDisabled) {
+                    return (
+                      <div
+                        key={item.path}
+                        className="flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 cursor-not-allowed opacity-40 bg-white/5 text-white/40"
+                        title="Veuillez activer votre Timesheet pour accéder à ce module"
+                      >
+                        <div className="flex items-center space-x-3">
+                          <Icon size={18} className="text-white/30" />
+                          <span>{item.label}</span>
+                        </div>
+                      </div>
+                    );
+                  }
                   return (
                     <Link
                       key={item.path}
@@ -368,6 +578,20 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
                 {allowedSystemAdmin.map((item) => {
                   const isActive = location.pathname === item.path;
                   const Icon = item.icon;
+                  if (navigationDisabled) {
+                    return (
+                      <div
+                        key={item.path}
+                        className="flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 cursor-not-allowed opacity-40 bg-white/5 text-white/40"
+                        title="Veuillez activer votre Timesheet pour accéder à ce module"
+                      >
+                        <div className="flex items-center space-x-3">
+                          <Icon size={18} className="text-white/30" />
+                          <span>{item.label}</span>
+                        </div>
+                      </div>
+                    );
+                  }
                   return (
                     <Link
                       key={item.path}
@@ -413,43 +637,7 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
           </div>
         </div>
 
-        {/* TIMESHEET TRACKER PANEL */}
-        {user && (
-          <div className="mx-4 mb-3 bg-white/5 border border-white/10 rounded-xl p-3 space-y-2 text-left">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold text-white/45 uppercase tracking-wider flex items-center gap-1">
-                <Clock size={11} className={timesheetActive ? "text-emerald-500 animate-pulse" : "text-white/40"} />
-                <span>Temps de Service (Timesheet)</span>
-              </span>
-              <span className={`text-[8px] font-black px-1.5 py-0.5 rounded ${timesheetActive ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/10 text-white/50'}`}>
-                {timesheetActive ? 'ACTIF' : 'INACTIF'}
-              </span>
-            </div>
-            
-            <div className="flex items-baseline justify-between pt-1">
-              <span className={`font-mono text-base font-black tracking-wider ${timesheetActive ? 'text-emerald-400' : 'text-white/40'}`}>
-                {elapsedText}
-              </span>
-              {timesheetStart > 0 && (
-                <span className="text-[9px] text-white/40 font-medium">
-                  Début : {new Date(timesheetStart).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                </span>
-              )}
-            </div>
 
-            <button
-              onClick={handleToggleTimesheet}
-              className={`w-full py-1.5 rounded-lg text-xs font-bold transition-all duration-150 cursor-pointer flex items-center justify-center space-x-1 ${
-                timesheetActive 
-                  ? 'bg-red-500/20 hover:bg-red-500/35 text-red-400 border border-red-500/30' 
-                  : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-md shadow-emerald-500/10'
-              }`}
-            >
-              <Clock size={12} />
-              <span>{timesheetActive ? 'Clôturer mon service' : 'Activer mon Timesheet'}</span>
-            </button>
-          </div>
-        )}
 
         {/* SIDEBAR FOOTER / PROFILE */}
         <div className="p-4 border-t border-white/10 bg-black/40 space-y-3">
@@ -465,7 +653,7 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
                 </div>
               </div>
               <button 
-                onClick={onLogout} 
+                onClick={handleManualLogout} 
                 className="p-1.5 rounded-lg hover:bg-red-500/20 text-white/60 hover:text-red-400 transition-colors"
                 title="Déconnexion"
               >
@@ -514,6 +702,58 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
           {/* HEADER OPTIONS */}
           <div className="flex items-center space-x-3 lg:space-x-6">
             
+            {/* TIMESHEET HEADER INDICATOR */}
+            {user && (
+              <div className={`flex items-center space-x-2 border rounded-xl px-2.5 py-1 transition-all duration-150 ${
+                timesheetActive 
+                  ? 'bg-emerald-500/5 border-emerald-500/20' 
+                  : isPaused 
+                    ? 'bg-amber-500/10 border-amber-500/30 animate-pulse' 
+                    : 'bg-white/10 border-white/5'
+              }`}>
+                <button
+                  onClick={() => handleToggleTimesheet(undefined, isPaused ? resumePauseReason : undefined)}
+                  className={`w-6 h-6 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
+                    timesheetActive 
+                      ? 'bg-red-500/20 text-red-400 hover:bg-red-500/35 border border-red-500/30' 
+                      : isPaused 
+                        ? 'bg-amber-500 text-white hover:bg-amber-600 shadow-xs'
+                        : 'bg-emerald-500 text-white hover:bg-emerald-600 shadow-xs'
+                  }`}
+                  title={timesheetActive ? 'Clôturer mon service (Timesheet)' : isPaused ? 'Désactiver la pause / Reprendre' : 'Démarrer mon service (Timesheet)'}
+                >
+                  {timesheetActive ? (
+                    <span className="w-1.5 h-1.5 rounded-xs bg-red-400"></span>
+                  ) : (
+                    <Play size={10} className="ml-0.5 fill-white text-white" />
+                  )}
+                </button>
+                <div className="flex flex-col text-left">
+                  <div className="flex items-center space-x-1.5 leading-none">
+                    <Clock size={11} className={timesheetActive ? "text-emerald-400 animate-pulse" : isPaused ? "text-amber-400 animate-pulse" : "text-white/40"} />
+                    <span className={`font-mono text-xs font-black tracking-wider ${
+                      timesheetActive 
+                        ? 'text-emerald-400' 
+                        : isPaused 
+                          ? 'text-amber-400 font-extrabold' 
+                          : 'text-white/40'
+                    }`}>
+                      {elapsedText}
+                    </span>
+                  </div>
+                  <span className={`text-[7px] font-bold uppercase tracking-wider mt-0.5 ${
+                    timesheetActive 
+                      ? 'text-emerald-400/80' 
+                      : isPaused 
+                        ? 'text-amber-400 font-extrabold' 
+                        : 'text-white/40'
+                  }`}>
+                    {timesheetActive ? 'En service' : isPaused ? 'Pause active' : 'Pause'}
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* GLOBAL SEARCH */}
             <div className="relative hidden md:block w-64">
               <input
@@ -650,7 +890,7 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
                 onClick={() => {
                   setIsLocked(false);
                   localStorage.removeItem('pms_is_locked');
-                  onLogout();
+                  handleManualLogout();
                 }}
                 className="w-full text-slate-400 hover:text-slate-700 text-[10px] font-bold py-1.5 transition-colors cursor-pointer"
               >
@@ -661,37 +901,186 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
         </div>
       )}
 
-      {/* MANDATORY TIMESHEET BLOCKER */}
-      {user && timesheetRequired && !timesheetActive && !isLocked && (
-        <div className="fixed inset-0 z-[9998] bg-[#0E0F11]/90 backdrop-blur-[12px] flex flex-col items-center justify-center px-4 select-none">
+      {/* MANDATORY TIMESHEET BLOCKER FOR NON-ADMINS */}
+      {user && !isAdmin && (!timesheetActive || forceOverlayDueToTermination) && !isLocked && (
+        <div className="fixed inset-0 z-[9998] bg-[#0E0F11]/90 backdrop-blur-[16px] flex flex-col items-center justify-center px-4 select-none">
           <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl p-6 text-center border border-slate-200 animate-fade-in">
-            <div className="w-14 h-14 mx-auto rounded-2xl bg-brand-orange/10 border border-brand-orange/30 flex items-center justify-center text-brand-orange mb-4 shadow-lg shadow-brand-orange/5">
+            <div className={`w-14 h-14 mx-auto rounded-2xl flex items-center justify-center mb-4 shadow-lg ${
+              isPaused 
+                ? 'bg-amber-100 border border-amber-300 text-amber-600 shadow-amber-500/5' 
+                : 'bg-brand-orange/10 border border-brand-orange/30 text-brand-orange shadow-brand-orange/5'
+            }`}>
               <Clock size={26} className="animate-pulse" />
             </div>
             
             <h2 className="text-base font-extrabold text-slate-900 tracking-tight">
-              Bonjour {user.name} 👋
+              {forceOverlayDueToTermination 
+                ? '⚠️ Session interrompue' 
+                : isPaused 
+                  ? 'Service en Pause ⏸️' 
+                  : `Bonjour ${user.name} 👋`}
             </h2>
             <p className="text-xs font-bold text-slate-600 mt-2 max-w-xs mx-auto leading-relaxed">
-              Pour continuer vous devez démarrer votre timesheet
+              {forceOverlayDueToTermination 
+                ? 'Une fermeture inattendue du navigateur ou de l\'onglet a été détectée alors que votre session était active. Veuillez réactiver votre temps de service pour continuer.'
+                : isPaused 
+                  ? 'Vous aviez suspendu votre service pour une pause. Pour pouvoir continuer à naviguer sur l\'application, vous devez désactiver la pause (reprendre votre service).'
+                  : 'Pour accéder au tableau de bord hôtelier et pouvoir naviguer sur l\'application, vous devez activer votre temps de service (Timesheet).'}
             </p>
+            <p className={`text-[10px] font-bold mt-3 px-2.5 py-1.5 rounded-lg border max-w-xs mx-auto ${
+              isPaused 
+                ? 'bg-amber-50 text-amber-600 border-amber-100' 
+                : 'bg-amber-50 text-amber-600 border-amber-100'
+            }`}>
+              {isPaused 
+                ? '⏸️ Statut Actuel : Pause • Votre chronomètre est suspendu.' 
+                : '⚠️ Attention : N\'oubliez pas de stopper votre chronomètre et clôturer votre service avant de vous déconnecter en fin de journée.'}
+            </p>
+
+            {isPaused && (
+              <div className="mt-4 text-left">
+                <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider block mb-1.5">
+                  Motif de la pause (Reason for pause) *
+                </label>
+                <select
+                  value={resumePauseReason}
+                  onChange={(e) => setResumePauseReason(e.target.value)}
+                  className="w-full bg-slate-50 hover:bg-slate-100 text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-brand-orange/30 transition-all cursor-pointer text-slate-800 font-bold"
+                >
+                  <option value="Break">☕ Pause déjeuner / Repas (Break)</option>
+                  <option value="Meeting">👥 Réunion de service (Meeting)</option>
+                  <option value="Personal">🚗 Impératif personnel (Personal)</option>
+                </select>
+              </div>
+            )}
 
             <div className="mt-6 space-y-3">
               <button
                 type="button"
-                onClick={handleToggleTimesheet}
+                onClick={() => handleToggleTimesheet(undefined, isPaused ? resumePauseReason : undefined)}
                 className="w-full bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-black py-2.5 rounded-lg transition-colors cursor-pointer shadow-md shadow-emerald-500/10 flex items-center justify-center gap-1.5"
               >
                 <Clock size={14} />
-                <span>Activer mon Timesheet</span>
+                <span>{isPaused ? 'Désactiver la Pause & Reprendre' : 'Activer mon Timesheet'}</span>
               </button>
+
+              {isPaused && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (user?.email) {
+                      localStorage.removeItem('pms_last_logout_motif_' + user.email);
+                    }
+                    try {
+                      const historyStr = localStorage.getItem('pms_timesheet_history') || '[]';
+                      const history = JSON.parse(historyStr);
+                      const latestPauseIndex = history.findIndex((h: any) => 
+                        h.userEmail === user?.email && h.motif === 'Pause'
+                      );
+                      if (latestPauseIndex !== -1) {
+                        history[latestPauseIndex].motif = `Pause (Clock-out without resuming)`;
+                        localStorage.setItem('pms_timesheet_history', JSON.stringify(history));
+                      }
+                    } catch(e) {}
+                    
+                    localStorage.removeItem('pms_timesheet_active');
+                    localStorage.removeItem('pms_timesheet_start_time');
+                    setTimesheetActive(false);
+                    window.dispatchEvent(new Event('pms-timesheet-changed'));
+                  }}
+                  className="w-full bg-red-500 hover:bg-red-600 text-white text-xs font-black py-2.5 rounded-lg transition-colors cursor-pointer shadow-md shadow-red-500/10 flex items-center justify-center gap-1.5"
+                >
+                  <Play size={10} className="rotate-90 fill-white" />
+                  <span>Clôturer définitivement mon service</span>
+                </button>
+              )}
               
               <button
                 type="button"
                 onClick={onLogout}
                 className="w-full text-slate-400 hover:text-slate-700 text-[10px] font-bold py-1.5 transition-colors cursor-pointer"
               >
-                Se déconnecter / Autre compte
+                Se déconnecter de la session
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* LOGOUT BLOCKER / MOTIF SELECTION MODAL */}
+      {showLogoutBlockerModal && (
+        <div className="fixed inset-0 z-[9999] bg-[#0E0F11]/85 backdrop-blur-[8px] flex items-center justify-center px-4">
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl p-6 border border-slate-200 animate-fade-in text-left">
+            <div className="flex items-center space-x-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-red-55 text-red-600 border border-red-100 flex items-center justify-center shrink-0">
+                <Lock size={20} />
+              </div>
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900 tracking-tight">Déconnexion Suspendue</h3>
+                <p className="text-[10px] text-slate-500 font-bold">Clôture de service obligatoire</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 mb-5 leading-relaxed font-bold">
+              Votre temps de service hôtelier (Timesheet) est toujours actif. Veuillez sélectionner un motif de clôture pour arrêter votre chronomètre avant de quitter la session :
+            </p>
+
+            <div className="space-y-2 mb-6">
+              {[
+                { id: 'fin', label: 'Fin de service', desc: 'Clôture définitive du poste pour aujourd\'hui', value: 'Fin de service' },
+                { id: 'pause', label: 'Pause', desc: 'Suspension temporaire pour pause ou repos', value: 'Pause' },
+                { id: 'reconnexion', label: 'Reconnexion', desc: 'Déconnexion rapide pour changer de terminal', value: 'Reconnexion' }
+              ].map((m) => (
+                <label 
+                  key={m.id} 
+                  className={`flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer ${
+                    selectedMotif === m.value 
+                      ? 'bg-amber-50 border-amber-300 shadow-xs' 
+                      : 'bg-slate-50 hover:bg-slate-100 border-slate-200'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="logout_motif"
+                    value={m.value}
+                    checked={selectedMotif === m.value}
+                    onChange={() => setSelectedMotif(m.value as any)}
+                    className="mt-1 accent-brand-orange h-4 w-4 cursor-pointer"
+                  />
+                  <div>
+                    <span className="text-xs font-black text-slate-800 block">{m.label}</span>
+                    <span className="text-[10px] text-slate-400 font-bold leading-normal block mt-0.5">{m.desc}</span>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowLogoutBlockerModal(false)}
+                className="flex-1 border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-bold py-2.5 rounded-lg transition-colors cursor-pointer text-center"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                disabled={!selectedMotif}
+                onClick={() => {
+                  if (user?.email) {
+                    localStorage.setItem('pms_last_logout_motif_' + user.email, selectedMotif);
+                  }
+                  handleToggleTimesheet(selectedMotif);
+                  setShowLogoutBlockerModal(false);
+                  onLogout();
+                }}
+                className={`flex-1 text-white text-xs font-black py-2.5 rounded-lg transition-all cursor-pointer text-center flex items-center justify-center gap-1.5 ${
+                  selectedMotif 
+                    ? 'bg-brand-orange hover:bg-brand-orange-hover shadow-md shadow-brand-orange/15' 
+                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                }`}
+              >
+                Clôturer & Se déconnecter
               </button>
             </div>
           </div>

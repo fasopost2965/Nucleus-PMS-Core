@@ -61,6 +61,7 @@ interface Employee {
   phone: string;
   status: 'Actif' | 'Suspendu';
   date_added: string;
+  timesheet_required?: boolean;
 }
 
 export default function SettingsPage() {
@@ -321,7 +322,8 @@ export default function SettingsPage() {
       email: newEmployee.email || 'non-renseigne@hotel.com',
       phone: newEmployee.phone || 'non-renseigne',
       status: 'Actif',
-      date_added: new Date().toISOString().split('T')[0]
+      date_added: new Date().toISOString().split('T')[0],
+      timesheet_required: true
     };
 
     const updated = [...employees, added];
@@ -1426,45 +1428,75 @@ export default function SettingsPage() {
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {employees.map((emp) => (
-                      <div key={emp.id} className="p-4 rounded-xl border border-slate-200 bg-white shadow-xs flex justify-between items-start gap-3">
-                        <div className="text-left space-y-1.5">
-                          <div className="flex items-center space-x-2">
-                            <div className="w-7 h-7 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-[11px]">
-                              {emp.first_name[0]}{emp.last_name[0]}
+                      <div key={emp.id} className="p-4 rounded-xl border border-slate-200 bg-white shadow-xs flex flex-col justify-between gap-3">
+                        <div className="flex justify-between items-start gap-3">
+                          <div className="text-left space-y-1.5">
+                            <div className="flex items-center space-x-2">
+                              <div className="w-7 h-7 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-[11px]">
+                                {emp.first_name[0]}{emp.last_name[0]}
+                              </div>
+                              <div>
+                                <h4 className="font-extrabold text-xs text-slate-900">{emp.first_name} {emp.last_name}</h4>
+                                <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wide">{emp.role}</p>
+                              </div>
                             </div>
-                            <div>
-                              <h4 className="font-extrabold text-xs text-slate-900">{emp.first_name} {emp.last_name}</h4>
-                              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wide">{emp.role}</p>
+                            
+                            <div className="text-[10px] text-slate-500 font-semibold space-y-0.5 pt-1 border-t border-slate-50">
+                              <p>Tél : <span className="font-mono text-slate-800">{emp.phone}</span></p>
+                              <p>Email : <span className="font-mono text-slate-800">{emp.email}</span></p>
+                              <p className="text-[8px] text-slate-400">Ajouté le : {emp.date_added}</p>
                             </div>
                           </div>
-                          
-                          <div className="text-[10px] text-slate-500 font-semibold space-y-0.5 pt-1 border-t border-slate-50">
-                            <p>Tél : <span className="font-mono text-slate-800">{emp.phone}</span></p>
-                            <p>Email : <span className="font-mono text-slate-800">{emp.email}</span></p>
-                            <p className="text-[8px] text-slate-400">Ajouté le : {emp.date_added}</p>
+
+                          <div className="flex flex-col items-end space-y-2 select-none">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleEmployeeStatus(emp.id)}
+                              className="cursor-pointer"
+                            >
+                              <Badge 
+                                label={emp.status} 
+                                type="default" 
+                                status={emp.status === 'Actif' ? 'confirmée' : 'occupée'} 
+                              />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteEmployee(emp.id)}
+                              className="text-slate-400 hover:text-red-600 p-1 transition-colors cursor-pointer"
+                              title="Retirer cet employé"
+                            >
+                              <Trash2 size={13} />
+                            </button>
                           </div>
                         </div>
 
-                        <div className="flex flex-col items-end space-y-2 select-none">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleEmployeeStatus(emp.id)}
-                            className="cursor-pointer"
-                          >
-                            <Badge 
-                              label={emp.status} 
-                              type="default" 
-                              status={emp.status === 'Actif' ? 'confirmée' : 'occupée'} 
+                        {/* HR Permissions toggling */}
+                        <div className="border-t border-slate-100 pt-3 mt-1 flex items-center justify-between">
+                          <div className="text-left">
+                            <span className="text-[9px] text-slate-500 font-bold block uppercase tracking-wider">Configuration RH</span>
+                            <span className="text-[10px] text-slate-400 font-medium block">Saisie du Timesheet obligatoire</span>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            {!isAdmin && <span className="text-[10px] text-slate-400">🔒 Admin</span>}
+                            <input
+                              type="checkbox"
+                              disabled={!isAdmin}
+                              checked={emp.timesheet_required !== false}
+                              onChange={() => {
+                                const updated = employees.map(e => {
+                                  if (e.id === emp.id) {
+                                    return { ...e, timesheet_required: e.timesheet_required === false ? true : false };
+                                  }
+                                  return e;
+                                });
+                                setEmployees(updated);
+                                localStorage.setItem('pms_employees', JSON.stringify(updated));
+                                window.dispatchEvent(new Event('pms-timesheet-changed'));
+                              }}
+                              className="rounded text-brand-orange focus:ring-brand-orange w-4 h-4 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                             />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteEmployee(emp.id)}
-                            className="text-slate-400 hover:text-red-600 p-1 transition-colors cursor-pointer"
-                            title="Retirer cet employé"
-                          >
-                            <Trash2 size={13} />
-                          </button>
+                          </div>
                         </div>
                       </div>
                     ))}
