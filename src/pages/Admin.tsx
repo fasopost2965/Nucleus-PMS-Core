@@ -15,11 +15,10 @@ export default function Admin() {
 
   // Simulated users
   const [users, setUsers] = useState([
-    { id: 'u-1', name: 'Amadou Koné', role: 'Super Administrateur', email: 'amadou@brunchbouake.com', status: 'Actif' },
-    { id: 'u-2', name: 'Koffi Germain', role: 'Réceptionniste', email: 'koffi@brunchbouake.com', status: 'Actif' },
-    { id: 'u-3', name: 'Awa Koné', role: 'Housekeeping', email: 'awa@brunchbouake.com', status: 'Actif' },
-    { id: 'u-4', name: 'Abdoulaye Touré', role: 'Technicien Maintenance', email: 'abdoulaye@brunchbouake.com', status: 'Actif' },
-    { id: 'u-5', name: 'Yao Anderson', role: 'Magasinier / Stock', email: 'yao@brunchbouake.com', status: 'Suspendu' }
+    { id: 'u-1', name: 'Amadou Koné', role: 'Super Administrateur', email: 'fasopost24@gmail.com', status: 'Actif' },
+    { id: 'u-2', name: 'Support Technique', role: 'Support Technique', email: 'support@brunchbouake.com', status: 'Actif' },
+    { id: 'u-3', name: 'E. Konin', role: 'Super Administrateur', email: 'ekonin@brunchbouake.com', status: 'Actif' },
+    { id: 'u-4', name: 'Service Réservations', role: 'Réceptionniste', email: 'reservation@brunchbouake.com', status: 'Actif' }
   ]);
 
   const toggleUserStatus = (id: string) => {

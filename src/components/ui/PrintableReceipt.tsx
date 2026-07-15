@@ -203,10 +203,10 @@ export default function PrintableReceipt({
     <div className="fixed inset-0 z-50 bg-slate-900/65 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto print:p-0 print:bg-white print:static" id="printable-receipt-modal">
       
       {/* Outer Card with controls on top */}
-      <div className="bg-slate-100 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[95vh] overflow-hidden flex flex-col border border-slate-200 print:my-0 print:shadow-none print:rounded-none print:border-none print:bg-white print:max-h-none" id="receipt-modal-inner">
+      <div className="bg-slate-100 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col my-4 border border-slate-200 print:my-0 print:shadow-none print:rounded-none print:border-none print:bg-white" id="receipt-modal-inner">
         
         {/* Top Control Dashboard - HIDDEN WHEN PRINTING */}
-        <div className="p-4 bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 print:hidden shrink-0">
+        <div className="p-4 bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 print:hidden">
           <div className="flex items-center gap-2.5">
             <div className="p-1.5 bg-brand-orange/20 rounded-lg">
               <FileText size={16} className="text-brand-orange" />
@@ -300,7 +300,7 @@ export default function PrintableReceipt({
 
         {/* Dynamic Sheet Body */}
         <div 
-          className="bg-white overflow-y-auto max-h-[calc(90vh-64px)] p-4 md:p-8 flex items-start justify-center print:p-0 print:overflow-visible print:bg-white print:max-h-none"
+          className="flex-1 bg-white overflow-y-auto p-4 md:p-8 flex items-center justify-center print:p-0 print:overflow-visible print:bg-white"
           id="receipt-print-wrapper"
         >
           {/* Custom print styling scope */}

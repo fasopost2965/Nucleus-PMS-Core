@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { LogIn, Key, Mail, ShieldAlert } from 'lucide-react';
+import { api } from '../utils/api';
 
 interface LoginProps {
   onLoginSuccess: (user: { name: string; role: string; email: string }) => void;
@@ -20,23 +21,78 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   const [hotelLogo] = useState<string | null>(() => localStorage.getItem('hotelLogo'));
   const [hotelName] = useState<string>(() => localStorage.getItem('hotelName') || 'Brunch Bouaké');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
 
-    setTimeout(() => {
-      if (email.trim() && password.trim()) {
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedPassword = password.trim();
+
+    try {
+      // 1. First, attempt to log in using the backend API database
+      const res = await api.login(trimmedEmail, trimmedPassword);
+      if (res && res.success && res.user) {
         onLoginSuccess({
-          name: 'Amadou Koné',
-          role: 'Super Administrateur',
-          email: email
+          name: `${res.user.firstName || ''} ${res.user.lastName || ''}`.trim() || res.user.name || 'Utilisateur',
+          role: res.user.role || 'Super Administrateur',
+          email: res.user.email
         });
-      } else {
-        setError('Veuillez remplir tous les champs obligatoires.');
+        setIsLoading(false);
+        return;
       }
-      setIsLoading(false);
-    }, 600);
+    } catch (apiErr: any) {
+      console.warn("Backend connection error or authentication failed:", apiErr);
+      // If the API server is active but explicitly rejected credentials, show that exact error.
+      if (apiErr.message && (apiErr.message.includes('incorrect') || apiErr.message.includes('invalides') || apiErr.message.includes('status 401') || apiErr.message.includes('401'))) {
+        setError(apiErr.message || 'Adresse email ou mot de passe incorrect.');
+        setIsLoading(false);
+        return;
+      }
+    }
+
+    // 2. Client-side fallback for static web hosting / offline SPA mode (LocalStorage)
+    const ALLOWED_USERS = [
+      {
+        email: 'support@brunchbouake.com',
+        password: 'Prodesk@2026',
+        name: 'Support Technique',
+        role: 'Support Technique'
+      },
+      {
+        email: 'ekonin@brunchbouake.com',
+        password: 'Prodesk@2026',
+        name: 'E. Konin',
+        role: 'Super Administrateur'
+      },
+      {
+        email: 'reservation@brunchbouake.com',
+        password: 'Prodesk@2026',
+        name: 'Service Réservations',
+        role: 'Réceptionniste'
+      },
+      {
+        email: 'fasopost24@gmail.com',
+        password: 'Prodesk@2026',
+        name: 'Amadou Koné',
+        role: 'Super Administrateur'
+      }
+    ];
+
+    const foundUser = ALLOWED_USERS.find(
+      u => u.email.toLowerCase() === trimmedEmail && u.password === trimmedPassword
+    );
+
+    if (foundUser) {
+      onLoginSuccess({
+        name: foundUser.name,
+        role: foundUser.role,
+        email: foundUser.email
+      });
+    } else {
+      setError('Adresse email ou mot de passe incorrect.');
+    }
+    setIsLoading(false);
   };
 
   return (

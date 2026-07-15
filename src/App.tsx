@@ -33,15 +33,27 @@ interface IUser {
 }
 
 export default function App() {
-  // Global authentication state — null = non connecté, affiche le login
-  const [user, setUser] = useState<IUser | null>(null);
+  // Global authentication state, checking localStorage first
+  const [user, setUser] = useState<IUser | null>(() => {
+    const saved = localStorage.getItem('pms_user');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
+  });
 
   const handleLogin = (loggedUser: IUser) => {
     setUser(loggedUser);
+    localStorage.setItem('pms_user', JSON.stringify(loggedUser));
   };
 
   const handleLogout = () => {
     setUser(null);
+    localStorage.removeItem('pms_user');
   };
 
   // If logged out, always redirect/render Login screen

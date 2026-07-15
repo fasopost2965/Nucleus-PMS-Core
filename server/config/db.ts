@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import mysql from 'mysql2/promise';
+import bcrypt from 'bcryptjs';
 
 // Database config variables
 const DB_HOST = process.env.DB_HOST || '';
@@ -49,12 +50,48 @@ function getInitialSeedData() {
         id: 1,
         role_id: 1,
         email: 'fasopost24@gmail.com',
-        password_hash: '$2a$10$T1q807kR0v2E0Mv7F7C2Oe9Gv7N8q07kR0v2E0Mv7F7C2Oe9Gv7N8q', // hash of "admin123"
+        password_hash: bcrypt.hashSync('Prodesk@2026', 10),
         first_name: 'Amadou',
         last_name: 'Koné',
         phone: '+225 07 00 00 00 01',
         status: 'active',
         role: 'Super Administrateur',
+        timezone: 'Africa/Abidjan'
+      },
+      {
+        id: 2,
+        role_id: 1,
+        email: 'support@brunchbouake.com',
+        password_hash: bcrypt.hashSync('Prodesk@2026', 10),
+        first_name: 'Support',
+        last_name: 'Technique',
+        phone: '+225 07 00 00 00 02',
+        status: 'active',
+        role: 'Support Technique',
+        timezone: 'Africa/Abidjan'
+      },
+      {
+        id: 3,
+        role_id: 1,
+        email: 'ekonin@brunchbouake.com',
+        password_hash: bcrypt.hashSync('Prodesk@2026', 10),
+        first_name: 'E.',
+        last_name: 'Konin',
+        phone: '+225 07 00 00 00 03',
+        status: 'active',
+        role: 'Super Administrateur',
+        timezone: 'Africa/Abidjan'
+      },
+      {
+        id: 4,
+        role_id: 3,
+        email: 'reservation@brunchbouake.com',
+        password_hash: bcrypt.hashSync('Prodesk@2026', 10),
+        first_name: 'Service',
+        last_name: 'Réservations',
+        phone: '+225 07 00 00 00 04',
+        status: 'active',
+        role: 'Réceptionniste',
         timezone: 'Africa/Abidjan'
       }
     ],

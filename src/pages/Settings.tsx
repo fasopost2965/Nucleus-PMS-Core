@@ -463,20 +463,51 @@ export default function SettingsPage() {
   };
 
   const handleClearAllDatabase = () => {
-    if (confirm('❌ DANGER : Cette action va effacer l\'intégralité des données locales de l\'application (Aucune sauvegarde locale). L\'application sera vierge et prête pour configurer un nouvel hôtel hôtelier de zéro. Êtes-vous absolument sûr ?')) {
+    if (confirm('❌ DANGER : Cette action va effacer l\'intégralité des données locales de l\'application (Aucune sauvegarde locale). L\'application sera vierge et prête pour accueillir vos vraies données de Brunch Bouaké. Êtes-vous absolument sûr ?')) {
       try {
+        // Keep active session keys
+        const pmsUser = localStorage.getItem('pms_user');
+        const pmsToken = localStorage.getItem('pms_jwt_token');
+        const hotelLogo = localStorage.getItem('hotelLogo');
+
         localStorage.clear();
         
-        // Seed only empty structure placeholders
-        localStorage.setItem('hotelName', 'Mon Nouvel Hôtel');
+        // Restore active session keys
+        if (pmsUser) localStorage.setItem('pms_user', pmsUser);
+        if (pmsToken) localStorage.setItem('pms_jwt_token', pmsToken);
+        if (hotelLogo) localStorage.setItem('hotelLogo', hotelLogo);
+
+        // Seed empty structure placeholders to prevent fallback to demo data
+        localStorage.setItem('hotelName', 'Brunch Bouaké');
+        localStorage.setItem('legalName', 'Brunch Bouaké SARL');
         localStorage.setItem('pms_rooms', JSON.stringify([]));
         localStorage.setItem('pms_reservations', JSON.stringify([]));
         localStorage.setItem('pms_guests', JSON.stringify([]));
         localStorage.setItem('pms_suppliers', JSON.stringify([]));
         localStorage.setItem('pms_stock', JSON.stringify([]));
+        localStorage.setItem('pms_stock_movements', JSON.stringify([]));
+        localStorage.setItem('pms_housekeeping_tasks', JSON.stringify([]));
+        localStorage.setItem('pms_maintenance_tickets', JSON.stringify([]));
+        localStorage.setItem('pms_payments', JSON.stringify([]));
+        localStorage.setItem('pms_invoices', JSON.stringify([]));
+        localStorage.setItem('pms_restaurant_orders', JSON.stringify([]));
+        localStorage.setItem('pms_employees', JSON.stringify([]));
         localStorage.setItem('pms_room_categories', JSON.stringify(mockRoomCategories)); // Keep basic standard categories
+
+        // HRMS Module empty collections
+        localStorage.setItem('hrms_employees', JSON.stringify([]));
+        localStorage.setItem('hrms_departments', JSON.stringify([]));
+        localStorage.setItem('hrms_jobs', JSON.stringify([]));
+        localStorage.setItem('hrms_teams', JSON.stringify([]));
+        localStorage.setItem('hrms_contracts', JSON.stringify([]));
+        localStorage.setItem('hrms_skills', JSON.stringify([]));
+        localStorage.setItem('hrms_employee_skills', JSON.stringify([]));
+        localStorage.setItem('hrms_documents', JSON.stringify([]));
+        localStorage.setItem('hrms_onboarding_tasks', JSON.stringify([]));
+        localStorage.setItem('hrms_business_events', JSON.stringify([]));
+        localStorage.setItem('hrms_payroll_rules', JSON.stringify([]));
         
-        setSuccessMsg('Base de données vidée ! L\'application est désormais vierge. Rechargement du PMS...');
+        setSuccessMsg('Base de données vidée ! L\'application est désormais vierge et prête pour vos données réelles. Rechargement du PMS...');
         triggerConfigRefresh();
         setTimeout(() => {
           window.location.reload();
