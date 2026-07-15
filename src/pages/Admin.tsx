@@ -4,9 +4,10 @@
  */
 
 import React, { useState } from 'react';
-import { ShieldCheck, Plus, Search, Eye, RefreshCw, HardDrive, Cpu, ShieldAlert, Users, Key, Terminal } from 'lucide-react';
+import { ShieldCheck, Plus, Search, Eye, RefreshCw, HardDrive, Cpu, ShieldAlert, Users, Key, Terminal, Shield, Check, Info } from 'lucide-react';
 import { PageHeader, Badge, AlertBanner } from '../components/ui/pms-ui';
 import { mockActivityLogs } from '../mockData';
+import { ALL_PMS_MODULES, getUserPrivileges, saveUserPrivileges, resetUserPrivileges } from '../utils/permissions';
 
 export default function Admin() {
   const [successMsg, setSuccessMsg] = useState('');
@@ -20,6 +21,43 @@ export default function Admin() {
     { id: 'u-3', name: 'E. Konin', role: 'Super Administrateur', email: 'ekonin@brunchbouake.com', status: 'Actif' },
     { id: 'u-4', name: 'Service Réservations', role: 'Réceptionniste', email: 'reservation@brunchbouake.com', status: 'Actif' }
   ]);
+
+  const [editingPrivilegesUser, setEditingPrivilegesUser] = useState<any | null>(null);
+  const [selectedPrivileges, setSelectedPrivileges] = useState<string[]>([]);
+
+  const handleEditPrivileges = (u: any) => {
+    setEditingPrivilegesUser(u);
+    setSelectedPrivileges(getUserPrivileges(u.email, u.role));
+  };
+
+  const handleTogglePrivilege = (path: string) => {
+    if (selectedPrivileges.includes(path)) {
+      setSelectedPrivileges(selectedPrivileges.filter(p => p !== path));
+    } else {
+      setSelectedPrivileges([...selectedPrivileges, path]);
+    }
+  };
+
+  const handleSavePrivileges = () => {
+    if (editingPrivilegesUser) {
+      saveUserPrivileges(editingPrivilegesUser.email, selectedPrivileges);
+      setSuccessMsg(`Privilèges de "${editingPrivilegesUser.name}" enregistrés avec succès.`);
+      setEditingPrivilegesUser(null);
+      // Dispatch storage event so components can react to permissions change
+      window.dispatchEvent(new Event('storage'));
+      setTimeout(() => setSuccessMsg(''), 4000);
+    }
+  };
+
+  const handleResetToDefaults = () => {
+    if (editingPrivilegesUser) {
+      resetUserPrivileges(editingPrivilegesUser.email);
+      setSuccessMsg(`Privilèges de "${editingPrivilegesUser.name}" réinitialisés aux valeurs par défaut.`);
+      setEditingPrivilegesUser(null);
+      window.dispatchEvent(new Event('storage'));
+      setTimeout(() => setSuccessMsg(''), 4000);
+    }
+  };
 
   const toggleUserStatus = (id: string) => {
     setUsers(users.map(u => {
@@ -113,17 +151,104 @@ export default function Admin() {
                           <Badge label={u.status} type="default" status={u.status === 'Actif' ? 'disponible' : 'occupée'} />
                         </td>
                         <td className="py-3.5 px-6 text-right">
-                          <button
-                            onClick={() => toggleUserStatus(u.id)}
-                            className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[10px] px-2 py-1 border border-slate-200 rounded-lg cursor-pointer"
-                          >
-                            {u.status === 'Actif' ? 'Suspendre' : 'Réactiver'}
-                          </button>
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => handleEditPrivileges(u)}
+                              className="bg-orange-50 hover:bg-orange-100 text-brand-orange font-bold text-[10px] px-2 py-1 border border-orange-200 rounded-lg cursor-pointer flex items-center space-x-1"
+                              title="Gérer les privilèges spécifiques de cet utilisateur"
+                            >
+                              <Shield size={10} />
+                              <span>Privilèges</span>
+                            </button>
+                            <button
+                              onClick={() => toggleUserStatus(u.id)}
+                              className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[10px] px-2 py-1 border border-slate-200 rounded-lg cursor-pointer"
+                            >
+                              {u.status === 'Actif' ? 'Suspendre' : 'Réactiver'}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {activeTab === 'users' && editingPrivilegesUser && (
+            <div className="p-6 bg-slate-50 border-t border-slate-200 animate-fade-in text-slate-800">
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900 flex items-center space-x-2">
+                    <Shield className="text-brand-orange animate-pulse" size={16} />
+                    <span>Gestion des Privilèges : {editingPrivilegesUser.name}</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Rôle de base : <span className="font-bold text-slate-700">{editingPrivilegesUser.role}</span> &bull; Email : <span className="font-mono text-slate-600 bg-slate-100 px-1 py-0.5 rounded">{editingPrivilegesUser.email}</span>
+                  </p>
+                </div>
+                <button
+                  onClick={() => setEditingPrivilegesUser(null)}
+                  className="text-slate-500 hover:text-slate-800 hover:bg-slate-100 text-xs font-bold px-2.5 py-1 rounded-lg border border-slate-200 bg-white transition-colors cursor-pointer"
+                >
+                  Fermer
+                </button>
+              </div>
+
+              <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-4 mb-4 shadow-inner">
+                <div className="flex items-center space-x-2 bg-blue-50 text-blue-700 p-3 rounded-lg text-xs font-medium border border-blue-100">
+                  <Info size={14} className="flex-shrink-0" />
+                  <span>
+                    {editingPrivilegesUser.role === 'Super Administrateur' || editingPrivilegesUser.role === 'Support Technique' 
+                      ? "Cet utilisateur possède un rôle d'administration système de niveau supérieur. Tous les modules lui sont accessibles par défaut et ne peuvent être restreints."
+                      : "Sélectionnez ou désélectionnez les modules ci-dessous pour accorder ou retirer des privilèges d'accès pour cet utilisateur. Les droits seront sauvegardés de façon permanente."}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {ALL_PMS_MODULES.map((mod) => {
+                    const isChecked = selectedPrivileges.includes(mod.path);
+                    const isSuper = editingPrivilegesUser.role === 'Super Administrateur' || editingPrivilegesUser.role === 'Support Technique';
+                    return (
+                      <label 
+                        key={mod.path} 
+                        className={`flex items-center space-x-2.5 p-2.5 rounded-lg border cursor-pointer select-none transition-all ${
+                          isChecked || isSuper
+                            ? 'border-brand-orange/40 bg-orange-50/20 text-brand-orange font-bold' 
+                            : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                        } ${isSuper ? 'opacity-65 cursor-not-allowed' : ''}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked || isSuper}
+                          disabled={isSuper}
+                          onChange={() => handleTogglePrivilege(mod.path)}
+                          className="rounded text-brand-orange focus:ring-brand-orange cursor-pointer"
+                        />
+                        <span className="text-[11px]">{mod.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  onClick={handleResetToDefaults}
+                  disabled={editingPrivilegesUser.role === 'Super Administrateur' || editingPrivilegesUser.role === 'Support Technique'}
+                  className="bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs px-3 py-1.5 border border-slate-200 rounded-lg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  Réinitialiser au rôle
+                </button>
+                <button
+                  onClick={handleSavePrivileges}
+                  disabled={editingPrivilegesUser.role === 'Super Administrateur' || editingPrivilegesUser.role === 'Support Technique'}
+                  className="bg-brand-orange hover:bg-brand-orange-hover text-white font-bold text-xs px-4 py-1.5 rounded-lg cursor-pointer flex items-center space-x-1.5 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-md shadow-brand-orange/10"
+                >
+                  <Check size={14} />
+                  <span>Enregistrer les privilèges</span>
+                </button>
+              </div>
             </div>
           )}
 

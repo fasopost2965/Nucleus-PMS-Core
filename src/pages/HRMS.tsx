@@ -63,69 +63,70 @@ import { api } from '../utils/api';
 
 export default function HRMS() {
   // États de persistance locaux du module
-  const [employees, setEmployees] = useState<IHRMSEmployee[]>(initialHRMSEmployees);
-  const [departments, setDepartments] = useState<IHRMSDepartment[]>(initialHRMSDepartments);
-  const [jobs, setJobs] = useState<IHRMSJob[]>(initialHRMSJobs);
-  const [teams, setTeams] = useState<IHRMSTeam[]>(initialHRMSTeams);
-  const [contracts, setContracts] = useState<IHRMSContract[]>(initialHRMSContracts);
-  const [skills, setSkills] = useState<IHRMSSkill[]>(initialHRMSSkills);
-  const [employeeSkills, setEmployeeSkills] = useState<IHRMSEmployeeSkill[]>(initialHRMSEmployeeSkills);
-  const [documents, setDocuments] = useState<IHRMSDocument[]>(initialHRMSDocuments);
-  const [onboardingTasks, setOnboardingTasks] = useState<IHRMSOnboardingTask[]>(initialHRMSOnboardingTasks);
-  const [businessEvents, setBusinessEvents] = useState<IHRMSBusinessEvent[]>(initialHRMSEvents);
-  const [payrollRules, setPayrollRules] = useState<IHRMSPayrollRule[]>(initialHRMSPayrollRules);
+  const isPurged = localStorage.getItem('pms_db_purged') === 'true';
+  const [employees, setEmployees] = useState<IHRMSEmployee[]>(() => isPurged ? [] : initialHRMSEmployees);
+  const [departments, setDepartments] = useState<IHRMSDepartment[]>(() => isPurged ? [] : initialHRMSDepartments);
+  const [jobs, setJobs] = useState<IHRMSJob[]>(() => isPurged ? [] : initialHRMSJobs);
+  const [teams, setTeams] = useState<IHRMSTeam[]>(() => isPurged ? [] : initialHRMSTeams);
+  const [contracts, setContracts] = useState<IHRMSContract[]>(() => isPurged ? [] : initialHRMSContracts);
+  const [skills, setSkills] = useState<IHRMSSkill[]>(() => isPurged ? [] : initialHRMSSkills);
+  const [employeeSkills, setEmployeeSkills] = useState<IHRMSEmployeeSkill[]>(() => isPurged ? [] : initialHRMSEmployeeSkills);
+  const [documents, setDocuments] = useState<IHRMSDocument[]>(() => isPurged ? [] : initialHRMSDocuments);
+  const [onboardingTasks, setOnboardingTasks] = useState<IHRMSOnboardingTask[]>(() => isPurged ? [] : initialHRMSOnboardingTasks);
+  const [businessEvents, setBusinessEvents] = useState<IHRMSBusinessEvent[]>(() => isPurged ? [] : initialHRMSEvents);
+  const [payrollRules, setPayrollRules] = useState<IHRMSPayrollRule[]>(() => isPurged ? [] : initialHRMSPayrollRules);
 
   // Synchronisation avec l'API du serveur Node / Express sur le montage
   useEffect(() => {
     const loadHRMSData = async () => {
       try {
         const loadedEmployees = await api.getEmployees();
-        if (loadedEmployees && loadedEmployees.length > 0) setEmployees(loadedEmployees);
+        setEmployees(loadedEmployees || []);
       } catch (e) { console.warn('Fallback API employés:', e); }
 
       try {
         const loadedDepts = await api.getDepartments();
-        if (loadedDepts && loadedDepts.length > 0) setDepartments(loadedDepts);
+        setDepartments(loadedDepts || []);
       } catch (e) { console.warn('Fallback API départements:', e); }
 
       try {
         const loadedJobs = await api.getJobs();
-        if (loadedJobs && loadedJobs.length > 0) setJobs(loadedJobs);
+        setJobs(loadedJobs || []);
       } catch (e) { console.warn('Fallback API postes:', e); }
 
       try {
         const loadedTeams = await api.getTeams();
-        if (loadedTeams && loadedTeams.length > 0) setTeams(loadedTeams);
+        setTeams(loadedTeams || []);
       } catch (e) { console.warn('Fallback API équipes:', e); }
 
       try {
         const loadedContracts = await api.getContracts();
-        if (loadedContracts && loadedContracts.length > 0) setContracts(loadedContracts);
+        setContracts(loadedContracts || []);
       } catch (e) { console.warn('Fallback API contrats:', e); }
 
       try {
         const loadedTasks = await api.getOnboardingTasks();
-        if (loadedTasks && loadedTasks.length > 0) setOnboardingTasks(loadedTasks);
+        setOnboardingTasks(loadedTasks || []);
       } catch (e) { console.warn('Fallback API tâches d\'intégration:', e); }
 
       try {
         const loadedSkills = await api.getSkills();
-        if (loadedSkills && loadedSkills.length > 0) setSkills(loadedSkills);
+        setSkills(loadedSkills || []);
       } catch (e) { console.warn('Fallback API compétences:', e); }
 
       try {
         const loadedEmpSkills = await api.getEmployeeSkills();
-        if (loadedEmpSkills && loadedEmpSkills.length > 0) setEmployeeSkills(loadedEmpSkills);
+        setEmployeeSkills(loadedEmpSkills || []);
       } catch (e) { console.warn('Fallback API compétences employés:', e); }
 
       try {
         const loadedRules = await api.getPayrollRules();
-        if (loadedRules && loadedRules.length > 0) setPayrollRules(loadedRules);
+        setPayrollRules(loadedRules || []);
       } catch (e) { console.warn('Fallback API règles de paie:', e); }
 
       try {
         const loadedEvents = await api.getBusinessEvents();
-        if (loadedEvents && loadedEvents.length > 0) setBusinessEvents(loadedEvents);
+        setBusinessEvents(loadedEvents || []);
       } catch (e) { console.warn('Fallback API événements:', e); }
     };
     loadHRMSData();

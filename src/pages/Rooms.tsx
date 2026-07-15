@@ -28,32 +28,33 @@ import RoomDetailsDrawer from '../components/rooms/RoomDetailsDrawer';
 
 export default function Rooms() {
   // Operational states loaded into React state for REST API readiness
-  const [rooms, setRooms] = useState<IRoom[]>(mockRooms);
+  const isPurged = localStorage.getItem('pms_db_purged') === 'true';
+  const [rooms, setRooms] = useState<IRoom[]>(() => isPurged ? [] : mockRooms);
   const [categories, setCategories] = useState<IRoomCategory[]>(mockRoomCategories);
   const [amenities, setAmenities] = useState<IAmenity[]>(mockAmenities);
-  const [reservations, setReservations] = useState(mockReservations);
-  const [guests, setGuests] = useState(mockGuests);
-  const [housekeepingTasks, setHousekeepingTasks] = useState(mockHousekeepingTasks);
-  const [maintenanceTickets, setMaintenanceTickets] = useState(mockMaintenanceTickets);
+  const [reservations, setReservations] = useState(() => isPurged ? [] : mockReservations);
+  const [guests, setGuests] = useState(() => isPurged ? [] : mockGuests);
+  const [housekeepingTasks, setHousekeepingTasks] = useState(() => isPurged ? [] : mockHousekeepingTasks);
+  const [maintenanceTickets, setMaintenanceTickets] = useState(() => isPurged ? [] : mockMaintenanceTickets);
 
   // Load from API on mount
   useEffect(() => {
     const loadAllData = async () => {
       try {
         const loadedRooms = await api.getRooms();
-        if (loadedRooms && loadedRooms.length > 0) setRooms(loadedRooms);
+        setRooms(loadedRooms || []);
       } catch (e) {
         console.warn('Rooms API fallback:', e);
       }
       try {
         const loadedGuests = await api.getGuests();
-        if (loadedGuests && loadedGuests.length > 0) setGuests(loadedGuests);
+        setGuests(loadedGuests || []);
       } catch (e) {
         console.warn('Guests API fallback:', e);
       }
       try {
         const loadedRes = await api.getReservations();
-        if (loadedRes && loadedRes.length > 0) setReservations(loadedRes);
+        setReservations(loadedRes || []);
       } catch (e) {
         console.warn('Reservations API fallback:', e);
       }

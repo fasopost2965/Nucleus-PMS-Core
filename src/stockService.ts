@@ -16,6 +16,9 @@ export function getStock(): IStockItem[] {
       // fallback
     }
   }
+  if (localStorage.getItem('pms_db_purged') === 'true') {
+    return [];
+  }
   // Initialize with mock stock if not present
   localStorage.setItem('pms_stock', JSON.stringify(mockStockItems));
   return mockStockItems;
@@ -36,6 +39,9 @@ export function getRoomsList(): IRoom[] {
       // fallback
     }
   }
+  if (localStorage.getItem('pms_db_purged') === 'true') {
+    return [];
+  }
   localStorage.setItem('pms_rooms', JSON.stringify(mockRooms));
   return mockRooms;
 }
@@ -54,6 +60,9 @@ export function getStockMovements(): IStockMovement[] {
     } catch (e) {
       // fallback
     }
+  }
+  if (localStorage.getItem('pms_db_purged') === 'true') {
+    return [];
   }
   // Initialize with mock movements if not present
   localStorage.setItem('pms_stock_movements', JSON.stringify(mockStockMovements));

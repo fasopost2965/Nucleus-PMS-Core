@@ -11,21 +11,34 @@ import { IInvoice, IPayment, IInvoiceItem, IGuest, IReservation } from '../types
 import PrintableReceipt from '../components/ui/PrintableReceipt';
 
 export default function Finance() {
-  const [invoices, setInvoices] = useState<IInvoice[]>(mockInvoices);
-  const [payments, setPayments] = useState<IPayment[]>(mockPayments);
+  const isPurged = localStorage.getItem('pms_db_purged') === 'true';
+  const [invoices, setInvoices] = useState<IInvoice[]>(() => {
+    const stored = localStorage.getItem('pms_invoices');
+    if (stored) {
+      try { return JSON.parse(stored); } catch (e) {}
+    }
+    return isPurged ? [] : mockInvoices;
+  });
+  const [payments, setPayments] = useState<IPayment[]>(() => {
+    const stored = localStorage.getItem('pms_payments');
+    if (stored) {
+      try { return JSON.parse(stored); } catch (e) {}
+    }
+    return isPurged ? [] : mockPayments;
+  });
   const [guests, setGuests] = useState<IGuest[]>(() => {
     const stored = localStorage.getItem('pms_guests');
     if (stored) {
       try { return JSON.parse(stored); } catch (e) {}
     }
-    return mockGuests;
+    return isPurged ? [] : mockGuests;
   });
   const [reservations, setReservations] = useState<IReservation[]>(() => {
     const stored = localStorage.getItem('pms_reservations');
     if (stored) {
       try { return JSON.parse(stored); } catch (e) {}
     }
-    return mockReservations;
+    return isPurged ? [] : mockReservations;
   });
   const [activeSubTab, setActiveSubTab] = useState<'invoices' | 'payments' | 'expenses' | 'caisse'>('invoices');
   const [searchQuery, setSearchQuery] = useState('');
@@ -36,6 +49,14 @@ export default function Finance() {
   const [currency, setCurrency] = useState<'XOF' | 'EUR'>(() => {
     return (localStorage.getItem('pms_currency') as 'XOF' | 'EUR') || 'XOF';
   });
+
+  useEffect(() => {
+    localStorage.setItem('pms_invoices', JSON.stringify(invoices));
+  }, [invoices]);
+
+  useEffect(() => {
+    localStorage.setItem('pms_payments', JSON.stringify(payments));
+  }, [payments]);
 
   useEffect(() => {
     const handleCurrencyChange = () => {
@@ -54,10 +75,20 @@ export default function Finance() {
   };
 
   // New simulated expense state
-  const [expenses, setExpenses] = useState([
-    { id: 'exp-1', reference: 'DEP-2026-001', category: 'Fournitures', amount: 12500, date: '2026-07-12', user: 'Amadou' },
-    { id: 'exp-2', reference: 'DEP-2026-002', category: 'Carburant', amount: 25000, date: '2026-07-11', user: 'Abdoulaye' },
-  ]);
+  const [expenses, setExpenses] = useState(() => {
+    const stored = localStorage.getItem('pms_expenses');
+    if (stored) {
+      try { return JSON.parse(stored); } catch (e) {}
+    }
+    return isPurged ? [] : [
+      { id: 'exp-1', reference: 'DEP-2026-001', category: 'Fournitures', amount: 12500, date: '2026-07-12', user: 'Amadou' },
+      { id: 'exp-2', reference: 'DEP-2026-002', category: 'Carburant', amount: 25000, date: '2026-07-11', user: 'Abdoulaye' },
+    ];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('pms_expenses', JSON.stringify(expenses));
+  }, [expenses]);
 
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [expCat, setExpCat] = useState('Fournitures');

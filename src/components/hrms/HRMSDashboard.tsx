@@ -36,6 +36,33 @@ export default function HRMSDashboard({
   employees,
   handleToggleOnboardingTask
 }: HRMSDashboardProps) {
+  const [timesheetHistory, setTimesheetHistory] = React.useState<{
+    id: string;
+    userName: string;
+    userEmail: string;
+    startTime: string;
+    endTime: string;
+    hours: number;
+    status: string;
+  }[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('pms_timesheet_history') || '[]');
+    } catch (e) {
+      return [];
+    }
+  });
+
+  React.useEffect(() => {
+    const handleSync = () => {
+      try {
+        setTimesheetHistory(JSON.parse(localStorage.getItem('pms_timesheet_history') || '[]'));
+      } catch (e) {}
+    };
+    window.addEventListener('pms-timesheet-changed', handleSync);
+    return () => {
+      window.removeEventListener('pms-timesheet-changed', handleSync);
+    };
+  }, []);
   return (
     <div className="space-y-6" id="hrms-dashboard-root">
       {/* 1. Stat Bento Grid (reusing the high-quality StatCard from pms-ui) */}
@@ -168,7 +195,73 @@ export default function HRMSDashboard({
 
       </div>
 
-      {/* 3. Global compliance banner */}
+      {/* 3. Timesheet Log Panel */}
+      <div className="bg-white border border-slate-200 shadow-xs rounded-2xl p-6 text-left">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
+          <div>
+            <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+              <Clock className="w-5 h-5 text-emerald-500" />
+              <span>Historique des Sessions de Service (Timesheets)</span>
+            </h3>
+            <p className="text-xs text-slate-500">Heures de connexion et temps de travail validés</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              localStorage.setItem('pms_timesheet_history', '[]');
+              setTimesheetHistory([]);
+              window.dispatchEvent(new Event('pms-timesheet-changed'));
+            }}
+            className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 px-2.5 py-1 rounded font-bold transition-all cursor-pointer"
+          >
+            Purger l'historique
+          </button>
+        </div>
+
+        {timesheetHistory.length === 0 ? (
+          <div className="py-8 text-center text-slate-400 text-xs font-medium bg-slate-50 rounded-xl border border-dashed border-slate-200">
+            Aucun historique de connexion enregistré. Activez votre timesheet depuis le menu latéral pour commencer.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-100 text-[10px] font-black uppercase text-slate-400 tracking-wider">
+                  <th className="py-2.5 px-3">Collaborateur</th>
+                  <th className="py-2.5 px-3">Heure d'Arrivée (Start)</th>
+                  <th className="py-2.5 px-3">Heure de Départ (End)</th>
+                  <th className="py-2.5 px-3 text-right">Durée Accumulée</th>
+                  <th className="py-2.5 px-3 text-center">Statut</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-xs">
+                {timesheetHistory.map((log) => (
+                  <tr key={log.id} className="hover:bg-slate-50/50">
+                    <td className="py-3 px-3">
+                      <div>
+                        <span className="font-bold text-slate-800 block">{log.userName}</span>
+                        <span className="text-[10px] text-slate-400 block">{log.userEmail}</span>
+                      </div>
+                    </td>
+                    <td className="py-3 px-3 text-slate-600 font-mono font-medium">{log.startTime}</td>
+                    <td className="py-3 px-3 text-slate-600 font-mono font-medium">{log.endTime}</td>
+                    <td className="py-3 px-3 text-right font-black text-slate-800 font-mono">
+                      {log.hours}h ({Math.round(log.hours * 60)} min)
+                    </td>
+                    <td className="py-3 px-3 text-center">
+                      <span className="bg-emerald-50 text-emerald-600 border border-emerald-100 text-[9px] font-bold px-2 py-0.5 rounded-full">
+                        {log.status || 'Validé'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* 4. Global compliance banner */}
       <div className="bg-orange-50 border border-orange-100 p-5 rounded-2xl flex flex-col md:flex-row items-center gap-4 justify-between">
         <div className="flex items-start gap-3 text-left">
           <Shield className="w-6 h-6 text-brand-orange mt-0.5 flex-shrink-0" />

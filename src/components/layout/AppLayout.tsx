@@ -34,15 +34,18 @@ import {
   Smartphone,
   Globe,
   Briefcase,
-  Pin
+  Pin,
+  Lock
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
+import { hasPermission } from '../../utils/permissions';
 
 interface AppLayoutProps {
   children: React.ReactNode;
   user: {
     name: string;
     role: string;
+    email: string;
     avatar?: string;
   } | null;
   onLogout: () => void;
@@ -54,6 +57,140 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [hotelName, setHotelName] = useState(() => localStorage.getItem('hotelName') || 'Brunch Resto-Bar Vip');
   const [hotelLogo, setHotelLogo] = useState<string | null>(() => localStorage.getItem('hotelLogo'));
+
+  // Inactivity Auto-Lock system
+  const [isLocked, setIsLocked] = useState(() => {
+    return localStorage.getItem('pms_is_locked') === 'true';
+  });
+  const [lockPassword, setLockPassword] = useState('');
+  const [lockError, setLockError] = useState('');
+
+  // Timesheet tracker state
+  const [timesheetActive, setTimesheetActive] = useState(() => localStorage.getItem('pms_timesheet_active') === 'true');
+  const [timesheetStart, setTimesheetStart] = useState(() => Number(localStorage.getItem('pms_timesheet_start_time') || '0'));
+  const [timesheetRequired, setTimesheetRequired] = useState(() => localStorage.getItem('pms_timesheet_required') === 'true');
+  const [elapsedText, setElapsedText] = useState('00:00:00');
+
+  useEffect(() => {
+    // Check if auto-lock is enabled
+    const lockEnabled = localStorage.getItem('pms_lock_enabled') !== 'false';
+    if (!lockEnabled || !user) return;
+
+    const timeoutInMinutes = Number(localStorage.getItem('pms_lock_timeout') || '10');
+    const timeoutMs = timeoutInMinutes * 60 * 1000;
+
+    let timer: NodeJS.Timeout;
+
+    const resetTimer = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        setIsLocked(true);
+        localStorage.setItem('pms_is_locked', 'true');
+      }, timeoutMs);
+    };
+
+    // Activity event listeners
+    const events = ['mousemove', 'keydown', 'mousedown', 'touchstart', 'scroll'];
+    const handleActivity = () => {
+      if (!isLocked) resetTimer();
+    };
+
+    events.forEach(event => {
+      window.addEventListener(event, handleActivity);
+    });
+
+    // Start timer on mount
+    resetTimer();
+
+    return () => {
+      clearTimeout(timer);
+      events.forEach(event => {
+        window.removeEventListener(event, handleActivity);
+      });
+    };
+  }, [user, isLocked]);
+
+  useEffect(() => {
+    const syncTimesheet = () => {
+      setTimesheetActive(localStorage.getItem('pms_timesheet_active') === 'true');
+      setTimesheetStart(Number(localStorage.getItem('pms_timesheet_start_time') || '0'));
+      setTimesheetRequired(localStorage.getItem('pms_timesheet_required') === 'true');
+    };
+
+    window.addEventListener('pms-timesheet-changed', syncTimesheet);
+    return () => {
+      window.removeEventListener('pms-timesheet-changed', syncTimesheet);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!timesheetActive || !timesheetStart) {
+      setElapsedText('00:00:00');
+      return;
+    }
+
+    const interval = setInterval(() => {
+      const diff = Date.now() - timesheetStart;
+      const hours = Math.floor(diff / (3600 * 1000));
+      const minutes = Math.floor((diff % (3600 * 1000)) / (60 * 1000));
+      const seconds = Math.floor((diff % (60 * 1000)) / 1000);
+
+      const fH = String(hours).padStart(2, '0');
+      const fM = String(minutes).padStart(2, '0');
+      const fS = String(seconds).padStart(2, '0');
+
+      setElapsedText(`${fH}:${fM}:${fS}`);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [timesheetActive, timesheetStart]);
+
+  const handleToggleTimesheet = () => {
+    if (timesheetActive) {
+      // Save to timesheet history before stopping
+      const durationMs = Date.now() - timesheetStart;
+      const hours = (durationMs / (1000 * 60 * 60)).toFixed(2);
+      const historyStr = localStorage.getItem('pms_timesheet_history') || '[]';
+      try {
+        const history = JSON.parse(historyStr);
+        history.unshift({
+          id: `ts-${Date.now()}`,
+          userEmail: user?.email || 'admin',
+          userName: user?.name || 'Administrateur',
+          startTime: new Date(timesheetStart).toLocaleString('fr-FR'),
+          endTime: new Date().toLocaleString('fr-FR'),
+          hours: Number(hours),
+          status: 'Validé'
+        });
+        localStorage.setItem('pms_timesheet_history', JSON.stringify(history));
+      } catch (e) {}
+
+      localStorage.removeItem('pms_timesheet_active');
+      localStorage.removeItem('pms_timesheet_start_time');
+      setTimesheetActive(false);
+    } else {
+      const now = Date.now();
+      localStorage.setItem('pms_timesheet_active', 'true');
+      localStorage.setItem('pms_timesheet_start_time', now.toString());
+      setTimesheetStart(now);
+      setTimesheetActive(true);
+    }
+    // Dispatch event to inform other active tabs or pages
+    window.dispatchEvent(new Event('pms-timesheet-changed'));
+  };
+
+  const handleUnlock = (e: React.FormEvent) => {
+    e.preventDefault();
+    const correctPassword = 'Prodesk@2026';
+    if (lockPassword === correctPassword) {
+      setIsLocked(false);
+      localStorage.removeItem('pms_is_locked');
+      setLockPassword('');
+      setLockError('');
+    } else {
+      setLockError('Mot de passe de déverrouillage incorrect (Défaut: Prodesk@2026).');
+    }
+  };
 
   useEffect(() => {
     const handleConfigChange = () => {
@@ -102,6 +239,13 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
     { path: '/settings', label: 'Paramètres', icon: Settings },
     { path: '/admin', label: 'Administration', icon: ShieldAlert }
   ];
+
+  const allowedOperations = menuItems.slice(0, 11).filter(item => 
+    user ? hasPermission(user.email, user.role, item.path) : false
+  );
+  const allowedSystemAdmin = menuItems.slice(11).filter(item => 
+    user ? hasPermission(user.email, user.role, item.path) : false
+  );
 
   const futureMenuItems = [
     { label: 'POS Restaurant', icon: Utensils },
@@ -189,57 +333,61 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
 
         {/* NAVIGATION MENUS */}
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-6">
-          <div>
-            <span className="px-3 text-[10px] font-bold text-white/40 uppercase tracking-wider block mb-2">Opérations</span>
-            <nav className="space-y-1">
-              {menuItems.slice(0, 11).map((item) => {
-                const isActive = location.pathname === item.path;
-                const Icon = item.icon;
-                return (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
-                      isActive 
-                        ? 'bg-brand-orange text-white font-bold shadow-lg shadow-brand-orange/20' 
-                        : 'hover:bg-white/10 hover:text-white text-white/70'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-3">
-                      <Icon size={18} className={isActive ? 'text-white' : 'text-white/45 group-hover:text-white'} />
-                      <span>{item.label}</span>
-                    </div>
-                  </Link>
-                );
-              })}
-            </nav>
-          </div>
+          {allowedOperations.length > 0 && (
+            <div>
+              <span className="px-3 text-[10px] font-bold text-white/40 uppercase tracking-wider block mb-2">Opérations</span>
+              <nav className="space-y-1">
+                {allowedOperations.map((item) => {
+                  const isActive = location.pathname === item.path;
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
+                        isActive 
+                          ? 'bg-brand-orange text-white font-bold shadow-lg shadow-brand-orange/20' 
+                          : 'hover:bg-white/10 hover:text-white text-white/70'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-3">
+                        <Icon size={18} className={isActive ? 'text-white' : 'text-white/45 group-hover:text-white'} />
+                        <span>{item.label}</span>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </nav>
+            </div>
+          )}
 
-          <div>
-            <span className="px-3 text-[10px] font-bold text-white/40 uppercase tracking-wider block mb-2">Système & Admin</span>
-            <nav className="space-y-1">
-              {menuItems.slice(11).map((item) => {
-                const isActive = location.pathname === item.path;
-                const Icon = item.icon;
-                return (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
-                      isActive 
-                        ? 'bg-brand-orange text-white font-bold shadow-lg shadow-brand-orange/20' 
-                        : 'hover:bg-white/10 hover:text-white text-white/70'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-3">
-                      <Icon size={18} className={isActive ? 'text-white' : 'text-white/45 group-hover:text-white'} />
-                      <span>{item.label}</span>
-                    </div>
-                  </Link>
-                );
-              })}
-            </nav>
-          </div>
+          {allowedSystemAdmin.length > 0 && (
+            <div>
+              <span className="px-3 text-[10px] font-bold text-white/40 uppercase tracking-wider block mb-2">Système & Admin</span>
+              <nav className="space-y-1">
+                {allowedSystemAdmin.map((item) => {
+                  const isActive = location.pathname === item.path;
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
+                        isActive 
+                          ? 'bg-brand-orange text-white font-bold shadow-lg shadow-brand-orange/20' 
+                          : 'hover:bg-white/10 hover:text-white text-white/70'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-3">
+                        <Icon size={18} className={isActive ? 'text-white' : 'text-white/45 group-hover:text-white'} />
+                        <span>{item.label}</span>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </nav>
+            </div>
+          )}
 
           {/* FUTURE MODULES ("À venir") */}
           <div>
@@ -264,6 +412,44 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
             </div>
           </div>
         </div>
+
+        {/* TIMESHEET TRACKER PANEL */}
+        {user && (
+          <div className="mx-4 mb-3 bg-white/5 border border-white/10 rounded-xl p-3 space-y-2 text-left">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-white/45 uppercase tracking-wider flex items-center gap-1">
+                <Clock size={11} className={timesheetActive ? "text-emerald-500 animate-pulse" : "text-white/40"} />
+                <span>Temps de Service (Timesheet)</span>
+              </span>
+              <span className={`text-[8px] font-black px-1.5 py-0.5 rounded ${timesheetActive ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/10 text-white/50'}`}>
+                {timesheetActive ? 'ACTIF' : 'INACTIF'}
+              </span>
+            </div>
+            
+            <div className="flex items-baseline justify-between pt-1">
+              <span className={`font-mono text-base font-black tracking-wider ${timesheetActive ? 'text-emerald-400' : 'text-white/40'}`}>
+                {elapsedText}
+              </span>
+              {timesheetStart > 0 && (
+                <span className="text-[9px] text-white/40 font-medium">
+                  Début : {new Date(timesheetStart).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              )}
+            </div>
+
+            <button
+              onClick={handleToggleTimesheet}
+              className={`w-full py-1.5 rounded-lg text-xs font-bold transition-all duration-150 cursor-pointer flex items-center justify-center space-x-1 ${
+                timesheetActive 
+                  ? 'bg-red-500/20 hover:bg-red-500/35 text-red-400 border border-red-500/30' 
+                  : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-md shadow-emerald-500/10'
+              }`}
+            >
+              <Clock size={12} />
+              <span>{timesheetActive ? 'Clôturer mon service' : 'Activer mon Timesheet'}</span>
+            </button>
+          </div>
+        )}
 
         {/* SIDEBAR FOOTER / PROFILE */}
         <div className="p-4 border-t border-white/10 bg-black/40 space-y-3">
@@ -409,6 +595,108 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
           </AnimatePresence>
         </main>
       </div>
+
+      {/* INACTIVITY LOCK OVERLAY SCREEN */}
+      {isLocked && (
+        <div className="fixed inset-0 z-[9999] bg-[#0E0F11]/95 backdrop-blur-[16px] flex flex-col items-center justify-center px-4 select-none">
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl p-6 text-center border border-slate-200 animate-fade-in">
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-brand-orange/10 border border-brand-orange/30 flex items-center justify-center text-brand-orange mb-4 shadow-lg shadow-brand-orange/5">
+              <Lock size={26} className="animate-pulse" />
+            </div>
+            
+            <h2 className="text-lg font-extrabold text-slate-900 tracking-tight">Session Verrouillée</h2>
+            <p className="text-[11px] text-slate-500 mt-1 max-w-xs mx-auto leading-relaxed">
+              Par mesure de sécurité, l'application a été automatiquement verrouillée suite à une période d'inactivité.
+            </p>
+            
+            {user && (
+              <div className="mt-4 p-3 bg-slate-50 rounded-xl text-left flex items-center space-x-3 border border-slate-100">
+                <div className="w-9 h-9 rounded-full bg-slate-900 text-white font-extrabold text-xs flex items-center justify-center uppercase">
+                  {user.name ? user.name.split(' ').map(n => n[0]).join('') : 'U'}
+                </div>
+                <div className="overflow-hidden">
+                  <span className="text-xs font-bold text-slate-800 block truncate">{user.name}</span>
+                  <span className="text-[10px] text-slate-400 block truncate">{user.email}</span>
+                </div>
+              </div>
+            )}
+
+            <form onSubmit={handleUnlock} className="mt-5 space-y-3">
+              <div className="space-y-1 text-left">
+                <label className="text-[9px] font-black text-slate-400 block uppercase tracking-wider">Saisir le mot de passe</label>
+                <input
+                  type="password"
+                  required
+                  autoFocus
+                  value={lockPassword}
+                  onChange={(e) => setLockPassword(e.target.value)}
+                  placeholder="Mot de passe (Défaut: Prodesk@2026)"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-brand-orange bg-slate-50 font-bold"
+                />
+                {lockError && (
+                  <span className="text-[10px] text-red-500 font-bold block mt-1 leading-tight">{lockError}</span>
+                )}
+              </div>
+
+              <button
+                type="submit"
+                className="w-full bg-brand-orange hover:bg-brand-orange-hover text-white text-xs font-extrabold py-2 rounded-lg transition-colors cursor-pointer shadow-md shadow-brand-orange/20"
+              >
+                Déverrouiller
+              </button>
+              
+              <button
+                type="button"
+                onClick={() => {
+                  setIsLocked(false);
+                  localStorage.removeItem('pms_is_locked');
+                  onLogout();
+                }}
+                className="w-full text-slate-400 hover:text-slate-700 text-[10px] font-bold py-1.5 transition-colors cursor-pointer"
+              >
+                Se déconnecter / Autre utilisateur
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MANDATORY TIMESHEET BLOCKER */}
+      {user && timesheetRequired && !timesheetActive && !isLocked && (
+        <div className="fixed inset-0 z-[9998] bg-[#0E0F11]/90 backdrop-blur-[12px] flex flex-col items-center justify-center px-4 select-none">
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl p-6 text-center border border-slate-200 animate-fade-in">
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-brand-orange/10 border border-brand-orange/30 flex items-center justify-center text-brand-orange mb-4 shadow-lg shadow-brand-orange/5">
+              <Clock size={26} className="animate-pulse" />
+            </div>
+            
+            <h2 className="text-base font-extrabold text-slate-900 tracking-tight">
+              Bonjour {user.name} 👋
+            </h2>
+            <p className="text-xs font-bold text-slate-600 mt-2 max-w-xs mx-auto leading-relaxed">
+              Pour continuer vous devez démarrer votre timesheet
+            </p>
+
+            <div className="mt-6 space-y-3">
+              <button
+                type="button"
+                onClick={handleToggleTimesheet}
+                className="w-full bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-black py-2.5 rounded-lg transition-colors cursor-pointer shadow-md shadow-emerald-500/10 flex items-center justify-center gap-1.5"
+              >
+                <Clock size={14} />
+                <span>Activer mon Timesheet</span>
+              </button>
+              
+              <button
+                type="button"
+                onClick={onLogout}
+                className="w-full text-slate-400 hover:text-slate-700 text-[10px] font-bold py-1.5 transition-colors cursor-pointer"
+              >
+                Se déconnecter / Autre compte
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

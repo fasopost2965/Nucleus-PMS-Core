@@ -160,8 +160,20 @@ export default function SettingsPage() {
   });
 
   // 6. SYSTEM / APPLICATION STATES
+  const [currentUser] = useState(() => {
+    const saved = localStorage.getItem('pms_user');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return { name: 'Amadou Koné', role: 'Super Administrateur' };
+  });
+  const isAdmin = currentUser.role.toLowerCase().includes('admin');
+
   const [appMode, setAppMode] = useState(() => localStorage.getItem('appMode') || 'production');
   const [backupEnabled, setBackupEnabled] = useState(() => localStorage.getItem('backupEnabled') !== 'false');
+  const [lockEnabled, setLockEnabled] = useState(() => localStorage.getItem('pms_lock_enabled') !== 'false');
+  const [lockTimeout, setLockTimeout] = useState(() => Number(localStorage.getItem('pms_lock_timeout') || '10'));
+  const [timesheetRequired, setTimesheetRequired] = useState(() => localStorage.getItem('pms_timesheet_required') !== 'false');
 
   // Trigger global layout refresh on change
   const triggerConfigRefresh = () => {
@@ -222,6 +234,9 @@ export default function SettingsPage() {
       // 6. System Preferences
       localStorage.setItem('appMode', appMode);
       localStorage.setItem('backupEnabled', String(backupEnabled));
+      localStorage.setItem('pms_lock_enabled', String(lockEnabled));
+      localStorage.setItem('pms_lock_timeout', String(lockTimeout));
+      localStorage.setItem('pms_timesheet_required', String(timesheetRequired));
 
       if (logo) {
         localStorage.setItem('hotelLogo', logo);
@@ -420,10 +435,22 @@ export default function SettingsPage() {
     }
   };
 
-  const handleResetToDemoData = () => {
+  const handleResetToDemoData = async () => {
     if (confirm('⚠️ Attention : Cette action va écraser TOUTES vos données actuelles (chambres, réservations, factures, stocks) et restaurer le jeu de données de démonstration de Brunch Resto-Bar VIP Bouaké. Continuer ?')) {
       try {
+        const token = localStorage.getItem('pms_jwt_token');
+        if (token) {
+          await fetch('/api/system/seed', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            }
+          });
+        }
+
         localStorage.clear();
+        localStorage.removeItem('pms_db_purged');
         
         // Repopulate standard config
         localStorage.setItem('hotelName', 'Brunch Resto-Bar Vip');
@@ -462,7 +489,7 @@ export default function SettingsPage() {
     }
   };
 
-  const handleClearAllDatabase = () => {
+  const handleClearAllDatabase = async () => {
     if (confirm('❌ DANGER : Cette action va effacer l\'intégralité des données locales de l\'application (Aucune sauvegarde locale). L\'application sera vierge et prête pour accueillir vos vraies données de Brunch Bouaké. Êtes-vous absolument sûr ?')) {
       try {
         // Keep active session keys
@@ -470,12 +497,25 @@ export default function SettingsPage() {
         const pmsToken = localStorage.getItem('pms_jwt_token');
         const hotelLogo = localStorage.getItem('hotelLogo');
 
+        if (pmsToken) {
+          await fetch('/api/system/purge', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${pmsToken}`
+            }
+          });
+        }
+
         localStorage.clear();
         
         // Restore active session keys
         if (pmsUser) localStorage.setItem('pms_user', pmsUser);
         if (pmsToken) localStorage.setItem('pms_jwt_token', pmsToken);
         if (hotelLogo) localStorage.setItem('hotelLogo', hotelLogo);
+
+        // Set the purged flag so that empty state is prioritized and mock fallbacks are bypassed
+        localStorage.setItem('pms_db_purged', 'true');
 
         // Seed empty structure placeholders to prevent fallback to demo data
         localStorage.setItem('hotelName', 'Brunch Bouaké');
@@ -1567,6 +1607,60 @@ export default function SettingsPage() {
                           className="rounded text-brand-orange focus:ring-brand-orange w-4.5 h-4.5 cursor-pointer"
                         />
                       </div>
+
+                      <div className="flex justify-between items-center pt-2 border-t border-slate-100 select-none">
+                        <div>
+                          <label className="text-slate-800 text-[11px] font-bold block">Verrouillage automatique</label>
+                          <span className="text-[8px] text-slate-400 block font-medium">Sécuriser l'application en cas d'inactivité prolongée</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          disabled={!isAdmin}
+                          checked={lockEnabled}
+                          onChange={(e) => setLockEnabled(e.target.checked)}
+                          className="rounded text-brand-orange focus:ring-brand-orange w-4.5 h-4.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        />
+                      </div>
+
+                      {lockEnabled && (
+                        <div className="pt-2 border-t border-slate-100">
+                          <label className="text-slate-800 text-[11px] font-bold block mb-1">Délai d'inactivité</label>
+                          <select
+                            disabled={!isAdmin}
+                            value={lockTimeout}
+                            onChange={(e) => setLockTimeout(Number(e.target.value))}
+                            className="w-full border border-slate-300 rounded-lg px-2.5 py-1.8 text-xs focus:outline-none bg-white font-bold disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
+                          >
+                            <option value={1}>1 minute</option>
+                            <option value={3}>3 minutes</option>
+                            <option value={5}>5 minutes</option>
+                            <option value={10}>10 minutes (Défaut)</option>
+                            <option value={15}>15 minutes</option>
+                            <option value={30}>30 minutes</option>
+                            <option value={60}>1 heure</option>
+                          </select>
+                        </div>
+                      )}
+
+                      <div className="flex justify-between items-center pt-2 border-t border-slate-100 select-none">
+                        <div>
+                          <label className="text-slate-800 text-[11px] font-bold block">Saisie du Timesheet obligatoire</label>
+                          <span className="text-[8px] text-slate-400 block font-medium">Exiger l'activation du temps de service pour travailler</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          disabled={!isAdmin}
+                          checked={timesheetRequired}
+                          onChange={(e) => setTimesheetRequired(e.target.checked)}
+                          className="rounded text-brand-orange focus:ring-brand-orange w-4.5 h-4.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        />
+                      </div>
+
+                      {!isAdmin && (
+                        <div className="pt-2 border-t border-slate-100 text-[9px] text-amber-600 font-bold flex items-center gap-1">
+                          <span>🔒 Ces options de sécurité sont gérées exclusivement par l'Administrateur du PMS.</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* JSON BACKUPS */}

@@ -36,6 +36,8 @@ import { getRoomsList, getStock, logManualStockMovement } from '../stockService'
 export default function Dashboard() {
   const navigate = useNavigate();
   const [hotelName] = useState(() => localStorage.getItem('hotelName') || 'Brunch Bouaké');
+  const isPurged = localStorage.getItem('pms_db_purged') === 'true';
+
   const [rooms, setRooms] = useState(() => getRoomsList());
   const [stock, setStock] = useState(() => getStock());
   const [reservations, setReservations] = useState(() => {
@@ -43,17 +45,40 @@ export default function Dashboard() {
     if (stored) {
       try { return JSON.parse(stored); } catch (e) {}
     }
-    return mockReservations;
+    return isPurged ? [] : mockReservations;
   });
   const [guests, setGuests] = useState(() => {
     const stored = localStorage.getItem('pms_guests');
     if (stored) {
       try { return JSON.parse(stored); } catch (e) {}
     }
-    return mockGuests;
+    return isPurged ? [] : mockGuests;
   });
-  const [activities, setActivities] = useState(mockActivityLogs);
+  const [activities, setActivities] = useState(() => isPurged ? [] : mockActivityLogs);
   const [successMsg, setSuccessMsg] = useState('');
+
+  // Currently logged-in user details for welcome banner
+  const [currentUser] = useState(() => {
+    const saved = localStorage.getItem('pms_user');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) {}
+    }
+    return { name: 'Amadou Koné', role: 'Super Administrateur' };
+  });
+
+  const [showWelcomeToast, setShowWelcomeToast] = useState(() => {
+    return localStorage.getItem('pms_welcome_notified') !== 'true';
+  });
+
+  const handleStartTimesheetFromWelcome = () => {
+    localStorage.setItem('pms_timesheet_active', 'true');
+    localStorage.setItem('pms_timesheet_start_time', Date.now().toString());
+    window.dispatchEvent(new Event('pms-timesheet-changed'));
+    setSuccessMsg('Votre Timesheet de connexion a été activé avec succès.');
+    setShowWelcomeToast(false);
+    localStorage.setItem('pms_welcome_notified', 'true');
+    setTimeout(() => setSuccessMsg(''), 5000);
+  };
 
   // Modals state
   const [showCheckInModal, setShowCheckInModal] = useState(false);
@@ -153,7 +178,15 @@ export default function Dashboard() {
     .reduce((acc, item) => acc + item.current_stock, 0);
 
   // Graphical Data
-  const occupancyData = [
+  const occupancyData = isPurged ? [
+    { name: 'Lun', Standard: 0, Suite: 0, Deluxe: 0 },
+    { name: 'Mar', Standard: 0, Suite: 0, Deluxe: 0 },
+    { name: 'Mer', Standard: 0, Suite: 0, Deluxe: 0 },
+    { name: 'Jeu', Standard: 0, Suite: 0, Deluxe: 0 },
+    { name: 'Ven', Standard: 0, Suite: 0, Deluxe: 0 },
+    { name: 'Sam', Standard: 0, Suite: 0, Deluxe: 0 },
+    { name: 'Dim', Standard: 0, Suite: 0, Deluxe: 0 },
+  ] : [
     { name: 'Lun', Standard: 65, Suite: 50, Deluxe: 70 },
     { name: 'Mar', Standard: 70, Suite: 60, Deluxe: 80 },
     { name: 'Mer', Standard: 80, Suite: 70, Deluxe: 90 },
@@ -163,7 +196,15 @@ export default function Dashboard() {
     { name: 'Dim', Standard: 85, Suite: 80, Deluxe: 90 },
   ];
 
-  const revenueData = [
+  const revenueData = isPurged ? [
+    { name: '07/07', Chambres: 0, Restaurant: 0, Total: 0 },
+    { name: '08/07', Chambres: 0, Restaurant: 0, Total: 0 },
+    { name: '09/07', Chambres: 0, Restaurant: 0, Total: 0 },
+    { name: '10/07', Chambres: 0, Restaurant: 0, Total: 0 },
+    { name: '11/07', Chambres: 0, Restaurant: 0, Total: 0 },
+    { name: '12/07', Chambres: 0, Restaurant: 0, Total: 0 },
+    { name: '13/07', Chambres: 0, Restaurant: 0, Total: 0 },
+  ] : [
     { name: '07/07', Chambres: 340000, Restaurant: 120000, Total: 460000 },
     { name: '08/07', Chambres: 410000, Restaurant: 165000, Total: 575000 },
     { name: '09/07', Chambres: 280000, Restaurant: 95000, Total: 375000 },
@@ -204,6 +245,65 @@ export default function Dashboard() {
           <span className="text-xs font-bold text-slate-800 pr-1.5">Aujourd'hui : {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
         </div>
       </div>
+
+      {/* WELCOME BANNER WITH TIMESHEET PROMPT */}
+      <AnimatePresence>
+        {showWelcomeToast && (
+          <motion.div
+            initial={{ opacity: 0, height: 0, y: -20 }}
+            animate={{ opacity: 1, height: 'auto', y: 0 }}
+            exit={{ opacity: 0, height: 0, y: -20 }}
+            transition={{ duration: 0.3 }}
+            className="overflow-hidden"
+          >
+            <div className="bg-gradient-to-r from-slate-900 to-[#1e2022] border-l-4 border-brand-orange text-white p-5 rounded-r-xl shadow-lg relative flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <button
+                onClick={() => {
+                  setShowWelcomeToast(false);
+                  localStorage.setItem('pms_welcome_notified', 'true');
+                }}
+                className="absolute top-3 right-3 text-white/50 hover:text-white p-1 rounded-full hover:bg-white/10 transition-colors cursor-pointer"
+                title="Ignorer"
+              >
+                <X size={16} />
+              </button>
+              
+              <div className="flex items-start space-x-4">
+                <div className="bg-brand-orange/20 p-2.5 rounded-lg border border-brand-orange/40 text-brand-orange animate-pulse mt-0.5">
+                  <Clock size={22} />
+                </div>
+                <div className="text-left">
+                  <h3 className="text-sm font-black text-white">
+                    Bonjour {currentUser.name} 👋
+                  </h3>
+                  <p className="text-xs text-white/95 mt-1 font-bold">
+                    Pour continuer vous devez démarrer votre timesheet
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2.5 self-end md:self-center">
+                <button
+                  onClick={() => {
+                    setShowWelcomeToast(false);
+                    localStorage.setItem('pms_welcome_notified', 'true');
+                  }}
+                  className="px-3 py-1.5 bg-white/10 hover:bg-white/15 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                >
+                  Plus tard
+                </button>
+                <button
+                  onClick={handleStartTimesheetFromWelcome}
+                  className="px-4 py-1.5 bg-brand-orange hover:bg-brand-orange-hover text-white text-xs font-black rounded-lg transition-colors flex items-center space-x-1.5 shadow-md shadow-brand-orange/20 cursor-pointer"
+                >
+                  <Clock size={13} />
+                  <span>Démarrer mon Timesheet</span>
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {successMsg && (
         <AlertBanner text={successMsg} type="success" />
@@ -334,86 +434,98 @@ export default function Dashboard() {
           </div>
           
           <div className="space-y-2 flex-1 overflow-y-auto">
-            <div 
-              onClick={() => {
-                setSelectedAlert({
-                  id: 'maint-2',
-                  title: 'Maintenance Critique #maint-2',
-                  description: 'Climatiseur Chambre 203 hors-service (Rapport Abdoulaye).',
-                  type: 'critical',
-                  badge: 'Assigné',
-                  details: 'Le climatiseur de la chambre Deluxe 203 présente une fuite de réfrigérant majeure. Un technicien externe (Ets. Saliou) a été planifié pour intervention aujourd\'hui à 15h. La chambre est bloquée à la vente jusqu\'à la résolution de l\'anomalie.',
-                  actionLabel: 'Prendre contact avec le technicien',
-                  actionType: 'maintenance'
-                });
-                setShowAlertModal(true);
-              }}
-              className="p-3 bg-red-50 border border-red-100 rounded-lg flex items-start space-x-2.5 hover:bg-red-100/80 hover:border-red-200 transition-all cursor-pointer group"
-            >
-              <span className="w-2 h-2 rounded-full bg-red-500 mt-1.5 flex-shrink-0 animate-ping"></span>
-              <div className="flex-1">
-                <h4 className="text-xs font-bold text-red-900 group-hover:text-red-950 transition-colors">Maintenance Critique #maint-2</h4>
-                <p className="text-[10px] text-red-700 mt-0.5">Climatiseur Chambre 203 hors-service (Rapport Abdoulaye).</p>
-                <div className="flex items-center justify-between mt-1.5">
-                  <span className="text-[8px] bg-red-200 text-red-800 font-bold px-1.5 py-0.5 rounded-sm">Assigné</span>
-                  <span className="text-[8px] text-red-600 font-bold underline group-hover:text-red-800">Traiter l'alerte →</span>
-                </div>
+            {isPurged ? (
+              <div className="flex flex-col items-center justify-center h-full border border-dashed border-slate-200 rounded-lg bg-slate-50 text-center p-4">
+                <CheckCircle className="text-emerald-500 mb-2" size={24} />
+                <p className="text-xs font-bold text-slate-700">Aucune alerte opérationnelle</p>
+                <p className="text-[10px] text-slate-400 mt-1 max-w-[200px] mx-auto">
+                  Tout est en ordre. Les alertes s'afficheront ici en cas de maintenance urgente ou de stock faible.
+                </p>
               </div>
-            </div>
+            ) : (
+              <>
+                <div 
+                  onClick={() => {
+                    setSelectedAlert({
+                      id: 'maint-2',
+                      title: 'Maintenance Critique #maint-2',
+                      description: 'Climatiseur Chambre 203 hors-service (Rapport Abdoulaye).',
+                      type: 'critical',
+                      badge: 'Assigné',
+                      details: 'Le climatiseur de la chambre Deluxe 203 présente une fuite de réfrigérant majeure. Un technicien externe (Ets. Saliou) a été planifié pour intervention aujourd\'hui à 15h. La chambre est bloquée à la vente jusqu\'à la résolution de l\'anomalie.',
+                      actionLabel: 'Prendre contact avec le technicien',
+                      actionType: 'maintenance'
+                    });
+                    setShowAlertModal(true);
+                  }}
+                  className="p-3 bg-red-50 border border-red-100 rounded-lg flex items-start space-x-2.5 hover:bg-red-100/80 hover:border-red-200 transition-all cursor-pointer group"
+                >
+                  <span className="w-2 h-2 rounded-full bg-red-500 mt-1.5 flex-shrink-0 animate-ping"></span>
+                  <div className="flex-1">
+                    <h4 className="text-xs font-bold text-red-900 group-hover:text-red-950 transition-colors">Maintenance Critique #maint-2</h4>
+                    <p className="text-[10px] text-red-700 mt-0.5">Climatiseur Chambre 203 hors-service (Rapport Abdoulaye).</p>
+                    <div className="flex items-center justify-between mt-1.5">
+                      <span className="text-[8px] bg-red-200 text-red-800 font-bold px-1.5 py-0.5 rounded-sm">Assigné</span>
+                      <span className="text-[8px] text-red-600 font-bold underline group-hover:text-red-800">Traiter l'alerte →</span>
+                    </div>
+                  </div>
+                </div>
 
-            <div 
-              onClick={() => {
-                setSelectedAlert({
-                  id: 'stock-1',
-                  title: 'Seuil d\'alerte stock franchi',
-                  description: 'Reste : 8 pièces de "Draps de bain Coton Blanc" (Seuil mini: 20).',
-                  type: 'warning',
-                  badge: 'Stock faible',
-                  details: 'Le stock de draps de bain en coton blanc de rechange à Bouaké est descendu en dessous du seuil critique de sécurité (8 pièces restantes contre un stock d\'alerte de 20 pièces). Veuillez passer commande auprès du fournisseur local pour éviter une rupture de service de blanchisserie.',
-                  actionLabel: 'Lancer un Bon de Commande Express (25)',
-                  actionType: 'stock'
-                });
-                setShowAlertModal(true);
-              }}
-              className="p-3 bg-amber-50 border border-amber-100 rounded-lg flex items-start space-x-2.5 hover:bg-amber-100/80 hover:border-amber-200 transition-all cursor-pointer group"
-            >
-              <span className="w-2 h-2 rounded-full bg-amber-500 mt-1.5 flex-shrink-0"></span>
-              <div className="flex-1">
-                <h4 className="text-xs font-bold text-amber-900 group-hover:text-amber-950 transition-colors">Seuil d'alerte stock franchi</h4>
-                <p className="text-[10px] text-amber-700 mt-0.5">Reste : 8 pièces de "Draps de bain Coton Blanc" (Seuil mini: 20).</p>
-                <div className="flex items-center justify-between mt-1.5">
-                  <span className="text-[8px] bg-amber-200 text-amber-800 font-bold px-1.5 py-0.5 rounded-sm">Stock faible</span>
-                  <span className="text-[8px] text-amber-600 font-bold underline group-hover:text-amber-800">Commander →</span>
+                <div 
+                  onClick={() => {
+                    setSelectedAlert({
+                      id: 'stock-1',
+                      title: 'Seuil d\'alerte stock franchi',
+                      description: 'Reste : 8 pièces de "Draps de bain Coton Blanc" (Seuil mini: 20).',
+                      type: 'warning',
+                      badge: 'Stock faible',
+                      details: 'Le stock de draps de bain en coton blanc de rechange à Bouaké est descendu en dessous du seuil critique de sécurité (8 pièces restantes contre un stock d\'alerte de 20 pièces). Veuillez passer commande auprès du fournisseur local pour éviter une rupture de service de blanchisserie.',
+                      actionLabel: 'Lancer un Bon de Commande Express (25)',
+                      actionType: 'stock'
+                    });
+                    setShowAlertModal(true);
+                  }}
+                  className="p-3 bg-amber-50 border border-amber-100 rounded-lg flex items-start space-x-2.5 hover:bg-amber-100/80 hover:border-amber-200 transition-all cursor-pointer group"
+                >
+                  <span className="w-2 h-2 rounded-full bg-amber-500 mt-1.5 flex-shrink-0"></span>
+                  <div className="flex-1">
+                    <h4 className="text-xs font-bold text-amber-900 group-hover:text-amber-950 transition-colors">Seuil d'alerte stock franchi</h4>
+                    <p className="text-[10px] text-amber-700 mt-0.5">Reste : 8 pièces de "Draps de bain Coton Blanc" (Seuil mini: 20).</p>
+                    <div className="flex items-center justify-between mt-1.5">
+                      <span className="text-[8px] bg-amber-200 text-amber-800 font-bold px-1.5 py-0.5 rounded-sm">Stock faible</span>
+                      <span className="text-[8px] text-amber-600 font-bold underline group-hover:text-amber-800">Commander →</span>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
 
-            <div 
-              onClick={() => {
-                setSelectedAlert({
-                  id: 'vip-1',
-                  title: 'Arrivée VIP aujourd\'hui',
-                  description: 'Jean-Pierre Duval (Chambre 202 Suite Brunch). Champagne prêt.',
-                  type: 'info',
-                  badge: 'VIP',
-                  details: 'M. Jean-Pierre Duval, client grand voyageur et VIP récurrent de notre établissement, séjournera pour 3 nuits dans notre Suite Brunch 202. Accueil personnalisé requis à la réception par le Manager. La bouteille de champagne de bienvenue est fraîche et prête en chambre.',
-                  actionLabel: 'Enregistrer le Check-In VIP',
-                  actionType: 'vip'
-                });
-                setShowAlertModal(true);
-              }}
-              className="p-3 bg-blue-50 border border-blue-100 rounded-lg flex items-start space-x-2.5 hover:bg-blue-100/80 hover:border-blue-200 transition-all cursor-pointer group"
-            >
-              <span className="w-2 h-2 rounded-full bg-blue-500 mt-1.5 flex-shrink-0"></span>
-              <div className="flex-1">
-                <h4 className="text-xs font-bold text-blue-900 group-hover:text-blue-950 transition-colors">Arrivée VIP aujourd'hui</h4>
-                <p className="text-[10px] text-blue-700 mt-0.5">Jean-Pierre Duval (Chambre 202 Suite Brunch). Champagne prêt.</p>
-                <div className="flex items-center justify-between mt-1.5">
-                  <span className="text-[8px] bg-blue-200 text-blue-800 font-bold px-1.5 py-0.5 rounded-sm">VIP</span>
-                  <span className="text-[8px] text-blue-600 font-bold underline group-hover:text-blue-800">Voir détails →</span>
+                <div 
+                  onClick={() => {
+                    setSelectedAlert({
+                      id: 'vip-1',
+                      title: 'Arrivée VIP aujourd\'hui',
+                      description: 'Jean-Pierre Duval (Chambre 202 Suite Brunch). Champagne prêt.',
+                      type: 'info',
+                      badge: 'VIP',
+                      details: 'M. Jean-Pierre Duval, client grand voyageur et VIP récurrent de notre établissement, séjournera pour 3 nuits dans notre Suite Brunch 202. Accueil personnalisé requis à la réception par le Manager. La bouteille de champagne de bienvenue est fraîche et prête en chambre.',
+                      actionLabel: 'Enregistrer le Check-In VIP',
+                      actionType: 'vip'
+                    });
+                    setShowAlertModal(true);
+                  }}
+                  className="p-3 bg-blue-50 border border-blue-100 rounded-lg flex items-start space-x-2.5 hover:bg-blue-100/80 hover:border-blue-200 transition-all cursor-pointer group"
+                >
+                  <span className="w-2 h-2 rounded-full bg-blue-500 mt-1.5 flex-shrink-0"></span>
+                  <div className="flex-1">
+                    <h4 className="text-xs font-bold text-blue-900 group-hover:text-blue-950 transition-colors">Arrivée VIP aujourd'hui</h4>
+                    <p className="text-[10px] text-blue-700 mt-0.5">Jean-Pierre Duval (Chambre 202 Suite Brunch). Champagne prêt.</p>
+                    <div className="flex items-center justify-between mt-1.5">
+                      <span className="text-[8px] bg-blue-200 text-blue-800 font-bold px-1.5 py-0.5 rounded-sm">VIP</span>
+                      <span className="text-[8px] text-blue-600 font-bold underline group-hover:text-blue-800">Voir détails →</span>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
+              </>
+            )}
           </div>
         </div>
 

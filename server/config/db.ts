@@ -43,7 +43,7 @@ if (!fs.existsSync(JSON_DB_DIR)) {
 }
 
 // Initial Database Seeding Helper
-function getInitialSeedData() {
+export function getInitialSeedData() {
   return {
     users: [
       {

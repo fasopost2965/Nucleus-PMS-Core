@@ -614,4 +614,65 @@ router.get('/hrms/business-events', async (req, res, next) => {
   }
 });
 
+// ==========================================
+// 8. SYSTEM MAINTENANCE ENDPOINTS (PURGE & SEED)
+// ==========================================
+import { getInitialSeedData, writeDB, readDB } from '../config/db';
+
+router.post('/system/purge', async (req, res, next) => {
+  try {
+    const currentData = readDB();
+    
+    // Create a blank data structure keeping only critical system parameters
+    const purgedData = {
+      ...getInitialSeedData(),
+      rooms: [],
+      reservations: [],
+      guests: [],
+      invoices: [],
+      payments: [],
+      housekeeping_tasks: [],
+      maintenance_tickets: [],
+      stock_items: [],
+      stock_movements: [],
+      restaurant_orders: [],
+      hrms_employees: [],
+      hrms_contracts: [],
+      hrms_onboarding_tasks: [],
+      hrms_business_events: [],
+      audit_logs: [],
+      hrms_departments: [],
+      hrms_teams: [],
+      hrms_jobs: []
+    };
+    
+    // Keep users intact so that active sessions are preserved
+    if (currentData && currentData.users) {
+      purgedData.users = currentData.users;
+    }
+    
+    writeDB(purgedData);
+    
+    return res.status(200).json({ 
+      success: true, 
+      message: 'La base de données du serveur a été vidée avec succès.' 
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/system/seed', async (req, res, next) => {
+  try {
+    // Reset back to standard mock/seed data
+    writeDB(getInitialSeedData());
+    return res.status(200).json({ 
+      success: true, 
+      message: 'Les données de démonstration du serveur ont été restaurées avec succès.' 
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
-import { LogIn, Key, Mail, ShieldAlert } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { LogIn, Key, Mail, ShieldAlert, Eye, EyeOff } from 'lucide-react';
 import { api } from '../utils/api';
 
 interface LoginProps {
@@ -15,11 +15,20 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const [hotelLogo] = useState<string | null>(() => localStorage.getItem('hotelLogo'));
   const [hotelName] = useState<string>(() => localStorage.getItem('hotelName') || 'Brunch Bouaké');
+
+  // Load remembered credentials on mount
+  useEffect(() => {
+    const rememberedEmail = localStorage.getItem('pms_remembered_email');
+    const rememberedPassword = localStorage.getItem('pms_remembered_password');
+    if (rememberedEmail) setEmail(rememberedEmail);
+    if (rememberedPassword) setPassword(rememberedPassword);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,6 +37,15 @@ export default function Login({ onLoginSuccess }: LoginProps) {
 
     const trimmedEmail = email.trim().toLowerCase();
     const trimmedPassword = password.trim();
+
+    // Persist or clear remembered credentials
+    if (rememberMe) {
+      localStorage.setItem('pms_remembered_email', trimmedEmail);
+      localStorage.setItem('pms_remembered_password', trimmedPassword);
+    } else {
+      localStorage.removeItem('pms_remembered_email');
+      localStorage.removeItem('pms_remembered_password');
+    }
 
     try {
       // 1. First, attempt to log in using the backend API database
@@ -156,14 +174,21 @@ export default function Login({ onLoginSuccess }: LoginProps) {
               </div>
               <div className="relative">
                 <input
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 text-sm text-slate-800 rounded-lg border border-slate-300 focus:border-brand-orange focus:ring-1 focus:ring-brand-orange focus:outline-none transition-all"
+                  className="w-full pl-10 pr-10 py-2 text-sm text-slate-800 rounded-lg border border-slate-300 focus:border-brand-orange focus:ring-1 focus:ring-brand-orange focus:outline-none transition-all"
                   placeholder="••••••••"
                 />
                 <Key className="absolute left-3 top-2.5 text-slate-400" size={16} />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-2 text-slate-400 hover:text-slate-600 focus:outline-none p-1"
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
               </div>
             </div>
 
