@@ -47,15 +47,46 @@ router.post('/auth/login', async (req, res, next) => {
       name: `${user.first_name} ${user.last_name}`
     });
 
+    const getUserPrivilegesList = (u: any) => {
+      if (u.privileges && Array.isArray(u.privileges)) {
+        return u.privileges;
+      }
+      const defaults: Record<string, string[]> = {
+        'Super Administrateur': [
+          '/dashboard', '/reception', '/rooms', '/reservations', '/guests', '/finance', 
+          '/hrms', '/housekeeping', '/maintenance', '/restaurant', '/inventory', '/reports', '/settings', '/admin'
+        ],
+        'Support Technique': [
+          '/dashboard', '/reception', '/rooms', '/reservations', '/guests', '/finance', 
+          '/hrms', '/housekeeping', '/maintenance', '/restaurant', '/inventory', '/reports', '/settings', '/admin'
+        ],
+        'Réceptionniste': [
+          '/dashboard', '/reception', '/rooms', '/reservations', '/guests', '/restaurant'
+        ],
+        'Housekeeping': [
+          '/dashboard', '/housekeeping', '/maintenance'
+        ],
+        'Technicien Maintenance': [
+          '/dashboard', '/maintenance'
+        ],
+        'Magasinier / Stock': [
+          '/dashboard', '/inventory'
+        ]
+      };
+      return defaults[u.role] || ['/dashboard'];
+    };
+
     return res.status(200).json({
       success: true,
       token,
       user: {
         id: user.id,
+        name: `${user.first_name} ${user.last_name}`,
         firstName: user.first_name,
         lastName: user.last_name,
         email: user.email,
-        role: user.role || 'Super Administrateur'
+        role: user.role || 'Super Administrateur',
+        privileges: getUserPrivilegesList(user)
       }
     });
   } catch (err) {
@@ -63,8 +94,223 @@ router.post('/auth/login', async (req, res, next) => {
   }
 });
 
+// Public Hotel settings endpoint (so Login page can render logo/brand from MySQL)
+router.get('/settings/hotel', async (req, res, next) => {
+  try {
+    const settingsList = await db.getCollection('hotel_settings');
+    const settings = settingsList[0] || {
+      id: 1,
+      hotel_name: 'Brunch Resto-Bar Vip',
+      legal_name: 'Brunch Resto-Bar Vip SARL',
+      phone: '+225 07 45 89 12 34',
+      email: 'contact@brunchresto.vip',
+      website: 'www.brunchresto.vip',
+      address: 'Quartier Commerce, face SGBCI, Bouaké, Côte d\'Ivoire'
+    };
+    return res.status(200).json({ success: true, settings });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Apply JWT Authentication middleware to all remaining endpoints
 router.use(authMiddleware as any);
+
+// ==========================================
+// ACTIVITY LOGGING UTILITY
+// ==========================================
+const logActivity = async (userId: number, module: string, action: string, recordId: string | null, details: string, ipAddress?: string) => {
+  try {
+    const logs = await db.getCollection('audit_logs');
+    const newLog = {
+      id: Date.now() + Math.floor(Math.random() * 1000),
+      user_id: userId,
+      module,
+      action,
+      record_id: recordId,
+      details,
+      ip_address: ipAddress || '127.0.0.1',
+      created_at: new Date().toISOString()
+    };
+    logs.push(newLog);
+    await db.saveCollection('audit_logs', logs);
+  } catch (err) {
+    console.error('[Activity Log] Error saving activity log:', err);
+  }
+};
+
+router.get('/activity-logs', async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const logs = await db.getCollection('audit_logs');
+    const users = await db.getCollection('users');
+    
+    // Sort logs descending by created_at or id
+    const sortedLogs = [...logs].sort((a: any, b: any) => {
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+
+    const enrichedLogs = sortedLogs.map((log: any) => {
+      const u = users.find((user: any) => user.id == log.user_id);
+      return {
+        ...log,
+        user: u ? {
+          id: u.id,
+          first_name: u.first_name,
+          last_name: u.last_name,
+          email: u.email,
+          role: u.role || 'Super Administrateur'
+        } : null
+      };
+    });
+
+    return res.status(200).json({ success: true, logs: enrichedLogs });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/auth/extend-session', async (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        error: { message: 'Token de session manquant ou invalide.', code: 'UNAUTHORIZED' }
+      });
+    }
+
+    const users = await db.getCollection('users');
+    const user = users.find((u: any) => u.email.toLowerCase() === req.user!.email.toLowerCase());
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        error: { message: 'Utilisateur inexistant.', code: 'USER_NOT_FOUND' }
+      });
+    }
+
+    // Generate fresh JWT token
+    const token = generateToken({
+      id: user.id,
+      email: user.email,
+      role: user.role || 'Super Administrateur',
+      name: `${user.first_name} ${user.last_name}`
+    });
+
+    await logActivity(user.id, 'auth', 'extend_session', String(user.id), `Session utilisateur prolongée de 24h.`);
+
+    const getUserPrivilegesList = (u: any) => {
+      if (u.privileges && Array.isArray(u.privileges)) {
+        return u.privileges;
+      }
+      const defaults: Record<string, string[]> = {
+        'Super Administrateur': [
+          '/dashboard', '/reception', '/rooms', '/reservations', '/guests', '/finance', 
+          '/hrms', '/housekeeping', '/maintenance', '/restaurant', '/inventory', '/reports', '/settings', '/admin'
+        ],
+        'Support Technique': [
+          '/dashboard', '/reception', '/rooms', '/reservations', '/guests', '/finance', 
+          '/hrms', '/housekeeping', '/maintenance', '/restaurant', '/inventory', '/reports', '/settings', '/admin'
+        ],
+        'Réceptionniste': [
+          '/dashboard', '/reception', '/rooms', '/reservations', '/guests', '/restaurant'
+        ],
+        'Housekeeping': [
+          '/dashboard', '/housekeeping', '/maintenance'
+        ],
+        'Technicien Maintenance': [
+          '/dashboard', '/maintenance'
+        ],
+        'Magasinier / Stock': [
+          '/dashboard', '/inventory'
+        ]
+      };
+      return defaults[u.role] || ['/dashboard'];
+    };
+
+    return res.status(200).json({
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        name: `${user.first_name} ${user.last_name}`,
+        firstName: user.first_name,
+        lastName: user.last_name,
+        email: user.email,
+        role: user.role || 'Super Administrateur',
+        privileges: getUserPrivilegesList(user)
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/auth/verify', async (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        error: { message: 'Token de session manquant ou invalide.', code: 'UNAUTHORIZED' }
+      });
+    }
+
+    const users = await db.getCollection('users');
+    const user = users.find((u: any) => u.email.toLowerCase() === req.user!.email.toLowerCase());
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        error: { message: 'Utilisateur inexistant dans la base de données. Session interrompue.', code: 'USER_NOT_FOUND' }
+      });
+    }
+
+    await logActivity(user.id, 'auth', 'verify_session', String(user.id), `Vérification automatique de la session utilisateur.`);
+
+    const getUserPrivilegesList = (u: any) => {
+      if (u.privileges && Array.isArray(u.privileges)) {
+        return u.privileges;
+      }
+      const defaults: Record<string, string[]> = {
+        'Super Administrateur': [
+          '/dashboard', '/reception', '/rooms', '/reservations', '/guests', '/finance', 
+          '/hrms', '/housekeeping', '/maintenance', '/restaurant', '/inventory', '/reports', '/settings', '/admin'
+        ],
+        'Support Technique': [
+          '/dashboard', '/reception', '/rooms', '/reservations', '/guests', '/finance', 
+          '/hrms', '/housekeeping', '/maintenance', '/restaurant', '/inventory', '/reports', '/settings', '/admin'
+        ],
+        'Réceptionniste': [
+          '/dashboard', '/reception', '/rooms', '/reservations', '/guests', '/restaurant'
+        ],
+        'Housekeeping': [
+          '/dashboard', '/housekeeping', '/maintenance'
+        ],
+        'Technicien Maintenance': [
+          '/dashboard', '/maintenance'
+        ],
+        'Magasinier / Stock': [
+          '/dashboard', '/inventory'
+        ]
+      };
+      return defaults[u.role] || ['/dashboard'];
+    };
+
+    return res.status(200).json({
+      success: true,
+      user: {
+        id: user.id,
+        name: `${user.first_name} ${user.last_name}`,
+        firstName: user.first_name,
+        lastName: user.last_name,
+        email: user.email,
+        role: user.role || 'Super Administrateur',
+        privileges: getUserPrivilegesList(user)
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // ==========================================
 // 2. DASHBOARD KPI ENDPOINT
@@ -184,6 +430,7 @@ router.post('/rooms', async (req: AuthenticatedRequest, res, next) => {
     };
 
     const inserted = await db.insert('rooms', newRoom);
+    await logActivity(req.user?.id || 1, 'rooms', 'create_room', inserted.id, `Création de la chambre ${inserted.room_number} (${inserted.bed_type})`);
     return res.status(201).json({ success: true, room: inserted });
   } catch (err) {
     next(err);
@@ -202,19 +449,23 @@ router.put('/rooms/:id', async (req: AuthenticatedRequest, res, next) => {
       return res.status(404).json({ success: false, error: { message: 'Chambre introuvable.' } });
     }
 
+    await logActivity(req.user?.id || 1, 'rooms', 'update_room', id, `Mise à jour de la chambre ${updated.room_number}`);
     return res.status(200).json({ success: true, room: updated });
   } catch (err) {
     next(err);
   }
 });
 
-router.delete('/rooms/:id', async (req, res, next) => {
+router.delete('/rooms/:id', async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
+    const room = await db.getById('rooms', id);
     const success = await db.delete('rooms', id);
     if (!success) {
       return res.status(404).json({ success: false, error: { message: 'Chambre introuvable.' } });
     }
+
+    await logActivity(req.user?.id || 1, 'rooms', 'delete_room', id, `Suppression de la chambre ${room ? room.room_number : id}`);
     return res.status(200).json({ success: true, message: 'Chambre retirée du référentiel.' });
   } catch (err) {
     next(err);
@@ -615,7 +866,23 @@ router.get('/hrms/business-events', async (req, res, next) => {
 });
 
 // ==========================================
-// 8. SYSTEM MAINTENANCE ENDPOINTS (PURGE & SEED)
+// 8. HOTEL SETTINGS ENDPOINTS
+// ==========================================
+router.put('/settings/hotel', async (req, res, next) => {
+  try {
+    const settingsList = await db.getCollection('hotel_settings');
+    const existing = settingsList[0] || { id: 1 };
+    const updatedData = { ...existing, ...req.body };
+    
+    await db.saveCollection('hotel_settings', [updatedData]);
+    return res.status(200).json({ success: true, settings: updatedData });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ==========================================
+// 9. SYSTEM MAINTENANCE ENDPOINTS (PURGE & SEED)
 // ==========================================
 import { getInitialSeedData, writeDB, readDB } from '../config/db';
 

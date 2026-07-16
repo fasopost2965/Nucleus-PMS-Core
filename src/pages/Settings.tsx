@@ -181,8 +181,37 @@ export default function SettingsPage() {
     window.dispatchEvent(new Event('hotel-config-changed'));
   };
 
+  useEffect(() => {
+    const fetchSettingsFromDB = async () => {
+      try {
+        const token = localStorage.getItem('pms_jwt_token');
+        if (!token) return;
+        const res = await fetch('/api/settings/hotel', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        const data = await res.json();
+        if (data.success && data.settings) {
+          const s = data.settings;
+          if (s.hotel_name || s.hotelName) setHotelName(s.hotel_name || s.hotelName);
+          if (s.legal_name || s.legalName) setLegalName(s.legal_name || s.legalName);
+          if (s.phone || s.hotelPhone) setPhone(s.phone || s.hotelPhone);
+          if (s.email || s.hotelEmail) setEmail(s.email || s.hotelEmail);
+          if (s.website || s.hotelWebsite) setWebsite(s.website || s.hotelWebsite);
+          if (s.address || s.hotelAddress) setAddress(s.address || s.hotelAddress);
+          if (s.logo !== undefined) setLogo(s.logo);
+        }
+      } catch (err) {
+        console.error('Failed to fetch settings from DB:', err);
+      }
+    };
+
+    fetchSettingsFromDB();
+  }, []);
+
   // MAIN SAVE HANDLER
-  const handleSaveAllSettings = (e: React.FormEvent) => {
+  const handleSaveAllSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       // 1. Hotel Identity & Policy Storage
@@ -245,12 +274,33 @@ export default function SettingsPage() {
         localStorage.removeItem('hotelLogo');
       }
 
+      // 7. Save to server database as well
+      const token = localStorage.getItem('pms_jwt_token');
+      if (token) {
+        await fetch('/api/settings/hotel', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            hotel_name: hotelName,
+            legal_name: legalName,
+            phone,
+            email,
+            website,
+            address,
+            logo
+          })
+        });
+      }
+
       triggerConfigRefresh();
       setSuccessMsg('Toutes les configurations hôtelières et applicatives ont été enregistrées avec succès.');
       window.scrollTo({ top: 0, behavior: 'smooth' });
       setTimeout(() => setSuccessMsg(''), 5000);
     } catch (err) {
-      setErrorMsg('Erreur lors de l\'enregistrement des paramètres locaux.');
+      setErrorMsg('Erreur lors de l\'enregistrement des paramètres locaux et de la base de données.');
       setTimeout(() => setErrorMsg(''), 5000);
     }
   };

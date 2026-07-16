@@ -35,6 +35,7 @@ import WelcomeNotification from '../components/WelcomeNotification';
 import { mockRooms, mockReservations, mockActivityLogs, mockGuests } from '../mockData';
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { getRoomsList, getStock, logManualStockMovement } from '../stockService';
+import { api } from '../utils/api';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -58,6 +59,8 @@ export default function Dashboard() {
     return isPurged ? [] : mockGuests;
   });
   const [activities, setActivities] = useState(() => isPurged ? [] : mockActivityLogs);
+  const [dbActivities, setDbActivities] = useState<any[]>([]);
+  const [loadingActivities, setLoadingActivities] = useState(true);
   const [successMsg, setSuccessMsg] = useState('');
 
   // Currently logged-in user details for welcome banner
@@ -73,6 +76,30 @@ export default function Dashboard() {
 
   const [timesheetActive, setTimesheetActive] = useState(() => localStorage.getItem('pms_timesheet_active') === 'true');
   const [resumePauseReason, setResumePauseReason] = useState<string>('Break');
+
+  React.useEffect(() => {
+    let active = true;
+    const fetchLogs = async () => {
+      try {
+        const logs = await api.getActivityLogs();
+        if (active) {
+          setDbActivities(logs);
+          setLoadingActivities(false);
+        }
+      } catch (err) {
+        console.error('Error fetching activity logs:', err);
+        if (active) setLoadingActivities(false);
+      }
+    };
+    fetchLogs();
+    
+    // Auto-refresh every 10 seconds
+    const interval = setInterval(fetchLogs, 10000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   React.useEffect(() => {
     const handleSync = () => {
@@ -705,29 +732,71 @@ export default function Dashboard() {
               <Clock className="text-slate-600" size={16} />
               <span>Activité récente (Audit)</span>
             </h3>
-            <p className="text-[10px] text-slate-400">Flux d'actions en direct enregistrées aujourd'hui</p>
+            <p className="text-[10px] text-slate-400">Flux d'actions en direct enregistrées aujourd'hui (Temps réel)</p>
           </div>
           
-          <div className="space-y-4 flex-1 overflow-y-auto max-h-56">
-            {activities.map((log) => (
-              <div key={log.id} className="relative flex space-x-3 text-xs">
-                <div className="flex flex-col items-center">
-                  <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
-                    log.type === 'success' ? 'bg-emerald-500' : log.type === 'error' ? 'bg-rose-500' : log.type === 'warning' ? 'bg-amber-500' : 'bg-slate-400'
-                  }`}></div>
-                  <div className="w-px h-full bg-slate-200 mt-1"></div>
-                </div>
-                <div className="pb-1">
-                  <div className="flex items-center space-x-2">
-                    <span className="font-bold text-slate-800">{log.time}</span>
-                    <span className="text-slate-400">•</span>
-                    <span className="text-[10px] text-slate-500 bg-slate-100 px-1 py-0.5 rounded font-medium">{log.module}</span>
-                  </div>
-                  <p className="text-slate-600 mt-0.5 font-medium">{log.details}</p>
-                  <p className="text-[9px] text-slate-400 mt-0.5">Par : {log.user}</p>
-                </div>
+          <div className="space-y-4 flex-1 overflow-y-auto max-h-56 pr-1">
+            {loadingActivities ? (
+              <div className="flex flex-col items-center justify-center py-10 text-slate-400">
+                <RefreshCw size={20} className="animate-spin text-slate-400 mb-2" />
+                <span className="text-[10px] font-bold">Chargement des activités...</span>
               </div>
-            ))}
+            ) : dbActivities.length === 0 ? (
+              <div className="text-center py-10 text-slate-400 font-bold text-xs">
+                Aucune activité enregistrée.
+              </div>
+            ) : (
+              dbActivities.slice(0, 15).map((log: any) => {
+                let bulletColor = 'bg-slate-400';
+                if (log.action && (log.action.includes('check_in') || log.action.includes('create') || log.action.includes('success') || log.action.includes('payment_received') || log.action.includes('login'))) {
+                  bulletColor = 'bg-emerald-500';
+                } else if (log.action && (log.action.includes('error') || log.action.includes('fail') || log.action.includes('suspend') || log.action.includes('purge'))) {
+                  bulletColor = 'bg-rose-500';
+                } else if (log.action && (log.action.includes('update') || log.action.includes('warning') || log.action.includes('extend'))) {
+                  bulletColor = 'bg-amber-500';
+                } else if (log.module === 'settings' || log.module === 'auth') {
+                  bulletColor = 'bg-indigo-500';
+                }
+
+                // Friendly date string
+                const timeStr = new Date(log.created_at).toLocaleTimeString('fr-FR', {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                });
+                const dateStr = new Date(log.created_at).toLocaleDateString('fr-FR', {
+                  day: 'numeric',
+                  month: 'short'
+                });
+
+                const userStr = log.user 
+                  ? `${log.user.first_name} ${log.user.last_name} (${log.user.role})`
+                  : 'Système';
+
+                return (
+                  <div key={log.id} className="relative flex space-x-3 text-xs">
+                    <div className="flex flex-col items-center">
+                      <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${bulletColor}`}></div>
+                      <div className="w-px h-full bg-slate-200 mt-1"></div>
+                    </div>
+                    <div className="pb-1.5 flex-1">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <span className="font-bold text-slate-800">{timeStr}</span>
+                          <span className="text-slate-400 text-[10px]">{dateStr}</span>
+                          <span className="text-slate-400">•</span>
+                          <span className="text-[9px] uppercase font-bold text-slate-500 bg-slate-100 px-1 py-0.5 rounded">{log.module}</span>
+                        </div>
+                        {log.ip_address && (
+                          <span className="text-[8px] font-mono text-slate-400">{log.ip_address}</span>
+                        )}
+                      </div>
+                      <p className="text-slate-600 mt-0.5 font-medium leading-relaxed">{log.details}</p>
+                      <p className="text-[9px] text-slate-400 mt-0.5">Par : {userStr}</p>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
 

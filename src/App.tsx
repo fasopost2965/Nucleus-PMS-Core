@@ -3,10 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate, Link } from 'react-router-dom';
 import { ShieldAlert, ArrowLeft } from 'lucide-react';
 import { hasPermission } from './utils/permissions';
+import { api } from './utils/api';
 
 // Core layout
 import AppLayout from './components/layout/AppLayout';
@@ -52,6 +53,11 @@ export default function App() {
     return null;
   });
 
+  // Start with true if there is a token to verify
+  const [isVerifying, setIsVerifying] = useState<boolean>(() => {
+    return !!localStorage.getItem('pms_jwt_token');
+  });
+
   const handleLogin = (loggedUser: IUser) => {
     logLogin({
       name: loggedUser.name,
@@ -72,7 +78,93 @@ export default function App() {
     }
     setUser(null);
     localStorage.removeItem('pms_user');
+    localStorage.removeItem('pms_jwt_token');
   };
+
+  useEffect(() => {
+    // 1. Fetch hotel settings so brand/logo updates propagate globally
+    const loadHotelSettings = async () => {
+      try {
+        const res = await fetch('/api/settings/hotel');
+        const data = await res.json();
+        if (data.success && data.settings) {
+          const s = data.settings;
+          localStorage.setItem('hotelName', s.hotel_name || 'Brunch Resto-Bar Vip');
+          if (s.logo) {
+            localStorage.setItem('hotelLogo', s.logo);
+          } else {
+            localStorage.removeItem('hotelLogo');
+          }
+          // Dispatch events so already-rendered components refresh immediately
+          window.dispatchEvent(new Event('hotel-config-changed'));
+        }
+      } catch (err) {
+        console.error('Failed to pre-fetch hotel settings:', err);
+      }
+    };
+
+    loadHotelSettings();
+
+    // 2. Verify current user against MySQL database
+    const verifyUserSession = async () => {
+      const token = localStorage.getItem('pms_jwt_token');
+      if (!token) {
+        setIsVerifying(false);
+        return;
+      }
+
+      try {
+        const res = await api.verifySession();
+        if (res && res.success && res.user) {
+          setUser(res.user);
+          localStorage.setItem('pms_user', JSON.stringify(res.user));
+        } else {
+          handleLogout();
+        }
+      } catch (err: any) {
+        console.error('Session verification error:', err.message);
+        if (err.message && (
+          err.message.includes('401') || 
+          err.message.includes('inexistant') || 
+          err.message.includes('expired') || 
+          err.message.includes('invalid') || 
+          err.message.includes('session')
+        )) {
+          handleLogout();
+        }
+      } finally {
+        setIsVerifying(false);
+      }
+    };
+
+    verifyUserSession();
+  }, []);
+
+  if (isVerifying) {
+    const cachedLogo = localStorage.getItem('hotelLogo');
+    const cachedName = localStorage.getItem('hotelName') || 'Brunch Resto-Bar Vip';
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#0E0F11] text-white">
+        <div className="flex flex-col items-center space-y-4 text-center">
+          {cachedLogo ? (
+            <img src={cachedLogo} alt="Logo" className="h-16 w-16 object-contain rounded-xl mb-2" referrerPolicy="no-referrer" />
+          ) : (
+            <div className="h-14 w-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-500 font-extrabold text-xl mb-2">
+              B
+            </div>
+          )}
+          <h2 className="text-lg font-bold tracking-tight text-slate-200">{cachedName}</h2>
+          <div className="flex items-center space-x-2 text-slate-400 text-xs font-mono">
+            <svg className="animate-spin h-4 w-4 text-amber-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span>Vérification de la session en cours...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // If logged out, always redirect/render Login screen
   if (!user) {

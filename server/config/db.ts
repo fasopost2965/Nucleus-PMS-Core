@@ -5,9 +5,9 @@ import bcrypt from 'bcryptjs';
 
 // Database config variables
 const DB_HOST = process.env.DB_HOST || '';
-const DB_USER = process.env.DB_USER || '';
-const DB_PASSWORD = process.env.DB_PASSWORD || '';
-const DB_NAME = process.env.DB_NAME || '';
+const DB_USER = process.env.DB_USER || 'u707543112_brunch_pms';
+const DB_PASSWORD = process.env.DB_PASSWORD || 'Prodesk@2965';
+const DB_NAME = process.env.DB_NAME || 'u707543112_brunch_pms';
 const DB_PORT = process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 3306;
 
 let pool: mysql.Pool | null = null;
@@ -17,22 +17,33 @@ const useMySQL = !!DB_HOST;
 if (useMySQL) {
   try {
     pool = mysql.createPool({
-      host: process.env.DB_HOST || "localhost",
-      user: process.env.DB_USER || "u707543112_brunch_pms",
-      password: process.env.DB_PASSWORD || "Prodesk@2965",
-      database: process.env.DB_NAME || "u707543112_brunch_pms",
-      port: process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 3306,
+      host: DB_HOST,
+      user: DB_USER,
+      password: DB_PASSWORD,
+      database: DB_NAME,
+      port: DB_PORT,
       waitForConnections: true,
       connectionLimit: 10,
       queueLimit: 0
     });
-    console.log("[Database] MySQL Connection Pool initialized.");
+    console.log('[Database] MySQL Connection Pool initialized.');
+
+    // Asynchronously verify/add columns to the hotel_settings table
+    (async () => {
+      try {
+        await pool.query("ALTER TABLE `hotel_settings` ADD COLUMN `logo` LONGTEXT NULL");
+        console.log('[Database MySQL] Ensured `logo` column exists in `hotel_settings`.');
+      } catch (e) {}
+      try {
+        await pool.query("ALTER TABLE `hotel_settings` ADD COLUMN `extra_config` LONGTEXT NULL");
+        console.log('[Database MySQL] Ensured `extra_config` column exists in `hotel_settings`.');
+      } catch (e) {}
+    })();
   } catch (err: any) {
-    console.error("[Database] Failed to initialize MySQL Pool, using JSON storage fallback.", err.message);
+    console.error('[Database] Failed to initialize MySQL Pool, using JSON storage fallback.', err.message);
     pool = null;
   }
 }
-
 
 // JSON Fallback storage config
 const JSON_DB_DIR = path.join(process.cwd(), 'server', 'data');
@@ -57,7 +68,11 @@ export function getInitialSeedData() {
         phone: '+225 07 00 00 00 01',
         status: 'active',
         role: 'Super Administrateur',
-        timezone: 'Africa/Abidjan'
+        timezone: 'Africa/Abidjan',
+        privileges: [
+          '/dashboard', '/reception', '/rooms', '/reservations', '/guests', '/finance', 
+          '/hrms', '/housekeeping', '/maintenance', '/restaurant', '/inventory', '/reports', '/settings', '/admin'
+        ]
       },
       {
         id: 2,
@@ -69,7 +84,11 @@ export function getInitialSeedData() {
         phone: '+225 07 00 00 00 02',
         status: 'active',
         role: 'Support Technique',
-        timezone: 'Africa/Abidjan'
+        timezone: 'Africa/Abidjan',
+        privileges: [
+          '/dashboard', '/reception', '/rooms', '/reservations', '/guests', '/finance', 
+          '/hrms', '/housekeeping', '/maintenance', '/restaurant', '/inventory', '/reports', '/settings', '/admin'
+        ]
       },
       {
         id: 3,
@@ -81,7 +100,11 @@ export function getInitialSeedData() {
         phone: '+225 07 00 00 00 03',
         status: 'active',
         role: 'Super Administrateur',
-        timezone: 'Africa/Abidjan'
+        timezone: 'Africa/Abidjan',
+        privileges: [
+          '/dashboard', '/reception', '/rooms', '/reservations', '/guests', '/finance', 
+          '/hrms', '/housekeeping', '/maintenance', '/restaurant', '/inventory', '/reports', '/settings', '/admin'
+        ]
       },
       {
         id: 4,
@@ -93,7 +116,10 @@ export function getInitialSeedData() {
         phone: '+225 07 00 00 00 04',
         status: 'active',
         role: 'Réceptionniste',
-        timezone: 'Africa/Abidjan'
+        timezone: 'Africa/Abidjan',
+        privileges: [
+          '/dashboard', '/reception', '/rooms', '/reservations', '/guests', '/restaurant'
+        ]
       }
     ],
     roles: [
@@ -221,7 +247,48 @@ export function getInitialSeedData() {
     hrms_business_events: [
       { id: 'evt-1', hotel_id: 1, timestamp: '2025-01-15T09:00:00Z', event_type: 'EmployeeCreated', actor_name: 'Comptable RH', description: 'Création de la fiche employé Koffi Yao et génération automatique des tâches d\'Onboarding.' }
     ],
-    audit_logs: []
+    audit_logs: [
+      {
+        id: 1001,
+        user_id: 1,
+        module: 'settings',
+        action: 'update_hotel_settings',
+        record_id: '1',
+        details: 'Mise à jour des coordonnées de l\'hôtel et configuration du taux de TVA à 18%',
+        ip_address: '192.168.1.10',
+        created_at: new Date(Date.now() - 3600000 * 2.5).toISOString() // 2.5 hours ago
+      },
+      {
+        id: 1002,
+        user_id: 4,
+        module: 'reservations',
+        action: 'check_in',
+        record_id: 'res-1',
+        details: 'Check-in validé pour le client Assa Diallo, attribution de la chambre 101',
+        ip_address: '192.168.1.15',
+        created_at: new Date(Date.now() - 3600000 * 1.8).toISOString() // 1.8 hours ago
+      },
+      {
+        id: 1003,
+        user_id: 4,
+        module: 'billing',
+        action: 'payment_received',
+        record_id: 'pay-101',
+        details: 'Acompte de 50 000 FCFA reçu via Mobile Money (Wave) pour la réservation RES-2026-0001',
+        ip_address: '192.168.1.15',
+        created_at: new Date(Date.now() - 3600000 * 1.5).toISOString() // 1.5 hours ago
+      },
+      {
+        id: 1004,
+        user_id: 1,
+        module: 'hrms',
+        action: 'sign_contract',
+        record_id: 'contract-1',
+        details: 'Signature du contrat d\'embauche CDI pour Koffi Yao (Réceptionniste)',
+        ip_address: '192.168.1.10',
+        created_at: new Date(Date.now() - 3600000 * 0.5).toISOString() // 30 mins ago
+      }
+    ]
   };
 }
 
@@ -261,7 +328,23 @@ export const db = {
     if (useMySQL && pool) {
       try {
         const [rows] = await pool.query(`SELECT * FROM \`${name}\``);
-        return rows as any[];
+        const mysqlRecords = rows as any[];
+        
+        // If MySQL has records, return them!
+        if (mysqlRecords.length > 0) {
+          return mysqlRecords;
+        }
+        
+        // If MySQL is empty, but local JSON has records, sync local JSON to MySQL!
+        const localData = readDB();
+        const localRecords = localData[name] || [];
+        if (localRecords.length > 0) {
+          console.log(`[Database MySQL] Table ${name} is empty. Auto-seeding with ${localRecords.length} local records.`);
+          await db.saveCollection(name, localRecords);
+          return localRecords;
+        }
+        
+        return [];
       } catch (err: any) {
         console.error(`[Database MySQL] Error reading ${name}, falling back to local JSON:`, err.message);
       }
@@ -278,8 +361,49 @@ export const db = {
     // Attempt sync if MySQL is active
     if (useMySQL && pool) {
       try {
-        // Simple log or statement
-        console.log(`[Database MySQL] Sync requested for collection: ${name}. Synchronizing in background.`);
+        if (records.length === 0) {
+          try {
+            await pool.query(`DELETE FROM \`${name}\``);
+          } catch (e: any) {
+            console.warn(`[Database MySQL] Failed to clear table ${name}:`, e.message);
+          }
+          return;
+        }
+
+        // Fetch columns of the table dynamically to prevent "Unknown Column" errors
+        const [columnsInfo] = await pool.query(`DESCRIBE \`${name}\``);
+        const allowedColumns = (columnsInfo as any[]).map(col => col.Field);
+
+        for (const record of records) {
+          const keys = Object.keys(record).filter(k => allowedColumns.includes(k));
+          if (keys.length === 0) continue;
+
+          const columns = keys.map(k => `\`${k}\``).join(', ');
+          const placeholders = keys.map(() => '?').join(', ');
+          const updateExpression = keys
+            .filter(k => k !== 'id' && k !== 'created_at')
+            .map(k => `\`${k}\` = VALUES(\`${k}\`)`)
+            .join(', ');
+
+          const values = keys.map(k => {
+            const val = record[k];
+            if (typeof val === 'object' && val !== null) {
+              return JSON.stringify(val);
+            }
+            if (typeof val === 'boolean') {
+              return val ? 1 : 0;
+            }
+            return val;
+          });
+
+          let sql = `INSERT INTO \`${name}\` (${columns}) VALUES (${placeholders})`;
+          if (updateExpression) {
+            sql += ` ON DUPLICATE KEY UPDATE ${updateExpression}`;
+          }
+
+          await pool.query(sql, values);
+        }
+        console.log(`[Database MySQL] Successfully synchronized ${records.length} records to table ${name}.`);
       } catch (err: any) {
         console.error(`[Database MySQL] Sync error for ${name}:`, err.message);
       }

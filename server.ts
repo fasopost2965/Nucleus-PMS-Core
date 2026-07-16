@@ -37,10 +37,31 @@ async function startServer() {
   } else {
     console.log('[Server] Running in PRODUCTION mode. Serving static assets.');
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    
+    // Serve static files with proper cache-busting and caching strategies
+    app.use(express.static(distPath, {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html')) {
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+        } else {
+          // Dynamic logos or non-hashed public resources should be validated but can be cached temporarily
+          if (filePath.includes('/logo') || filePath.endsWith('.png') || filePath.endsWith('.jpg') || filePath.endsWith('.svg')) {
+            res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+          } else {
+            // Version-hashed compiled assets can be safely cached immutably
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          }
+        }
+      }
+    }));
     
     // Catch-all to support React Router single page navigation
     app.get('*', (req, res) => {
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.set('Pragma', 'no-cache');
+      res.set('Expires', '0');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

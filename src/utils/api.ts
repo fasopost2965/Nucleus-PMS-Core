@@ -65,6 +65,20 @@ export const api = {
     }
     return res;
   },
+  verifySession: async (): Promise<any> => {
+    return request('/auth/verify', { method: 'GET' });
+  },
+  extendSession: async (): Promise<any> => {
+    const res = await request('/auth/extend-session', { method: 'POST' });
+    if (res && res.success && res.token) {
+      setSession(res.token, res.user);
+    }
+    return res;
+  },
+  getActivityLogs: async (): Promise<any[]> => {
+    const res = await request('/activity-logs');
+    return res.logs || [];
+  },
 
   // Rooms API
   getRooms: async (): Promise<any[]> => {

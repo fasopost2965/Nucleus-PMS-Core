@@ -40,6 +40,7 @@ import {
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { hasPermission } from '../../utils/permissions';
+import { api } from '../../utils/api';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -48,6 +49,7 @@ interface AppLayoutProps {
     role: string;
     email: string;
     avatar?: string;
+    privileges?: string[];
   } | null;
   onLogout: () => void;
 }
@@ -397,6 +399,36 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
   };
 
   useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const token = localStorage.getItem('pms_jwt_token');
+        if (!token) return;
+        const res = await fetch('/api/settings/hotel', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        const data = await res.json();
+        if (data.success && data.settings) {
+          const s = data.settings;
+          setHotelName(s.hotel_name || s.hotelName || 'Brunch Resto-Bar Vip');
+          setHotelLogo(s.logo || s.hotelLogo || null);
+          localStorage.setItem('hotelName', s.hotel_name || s.hotelName || 'Brunch Resto-Bar Vip');
+          if (s.logo) {
+            localStorage.setItem('hotelLogo', s.logo);
+          } else {
+            localStorage.removeItem('hotelLogo');
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch settings from DB:', err);
+      }
+    };
+
+    if (user) {
+      fetchSettings();
+    }
+
     const handleConfigChange = () => {
       setHotelName(localStorage.getItem('hotelName') || 'Brunch Resto-Bar Vip');
       setHotelLogo(localStorage.getItem('hotelLogo'));
@@ -409,7 +441,84 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
       window.removeEventListener('hotel-config-changed', handleConfigChange);
       window.removeEventListener('storage', handleConfigChange);
     };
-  }, []);
+  }, [user]);
+
+  // Session Expiration Monitor
+  const [showExpiryWarning, setShowExpiryWarning] = useState(false);
+  const [expirySecondsLeft, setExpirySecondsLeft] = useState(300); // 5 minutes default
+  const [expirySuccess, setExpirySuccess] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const checkTokenExpiry = () => {
+      const token = localStorage.getItem('pms_jwt_token');
+      if (!token) return;
+
+      try {
+        const parts = token.split('.');
+        if (parts.length !== 3) return;
+
+        // Decode payload
+        const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+        if (payload.exp) {
+          const expMs = payload.exp * 1000;
+          const timeLeftMs = expMs - Date.now();
+          const warningThresholdMs = 5 * 60 * 1000; // 5 minutes in ms
+
+          if (timeLeftMs <= 0) {
+            // Token is fully expired. Cleanly log out.
+            onLogout();
+          } else if (timeLeftMs <= warningThresholdMs) {
+            // Within 5 minutes of expiration
+            setShowExpiryWarning(true);
+            setExpirySecondsLeft(Math.max(0, Math.floor(timeLeftMs / 1000)));
+          } else {
+            // Expiry got pushed back, close warning
+            setShowExpiryWarning(false);
+          }
+        }
+      } catch (err) {
+        console.error('Error monitoring token expiry:', err);
+      }
+    };
+
+    // Run check immediately on mount or user change
+    checkTokenExpiry();
+
+    // Run check every 5 seconds
+    const interval = setInterval(checkTokenExpiry, 5000);
+    return () => clearInterval(interval);
+  }, [user, onLogout]);
+
+  useEffect(() => {
+    if (!showExpiryWarning) return;
+
+    const interval = setInterval(() => {
+      setExpirySecondsLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          onLogout();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [showExpiryWarning, onLogout]);
+
+  const handleExtendSession = async () => {
+    try {
+      await api.extendSession();
+      setShowExpiryWarning(false);
+      setExpirySuccess(true);
+      setTimeout(() => setExpirySuccess(false), 4000);
+    } catch (err) {
+      console.error('Failed to extend user session:', err);
+    }
+  };
+
   const [sidebarPinned, setSidebarPinned] = useState<boolean>(() => {
     const stored = localStorage.getItem('pms_sidebar_pinned');
     return stored !== null ? stored === 'true' : true;
@@ -446,11 +555,29 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
     { path: '/admin', label: 'Administration', icon: ShieldAlert }
   ];
 
+  const hasDbPermission = (path: string): boolean => {
+    if (!user) return false;
+    // Super Admins and Support always have absolute access
+    if (user.role === 'Super Administrateur' || user.role === 'Support Technique') {
+      return true;
+    }
+    // Dashboard is always accessible
+    if (path === '/dashboard') {
+      return true;
+    }
+    // If privileges exists in user object (fetched from database), check it!
+    if (user.privileges && Array.isArray(user.privileges)) {
+      return user.privileges.includes(path);
+    }
+    // Fallback to role-based privileges locally
+    return hasPermission(user.email, user.role, path);
+  };
+
   const allowedOperations = menuItems.slice(0, 11).filter(item => 
-    user ? hasPermission(user.email, user.role, item.path) : false
+    hasDbPermission(item.path)
   );
   const allowedSystemAdmin = menuItems.slice(11).filter(item => 
-    user ? hasPermission(user.email, user.role, item.path) : false
+    hasDbPermission(item.path)
   );
 
   const futureMenuItems = [
@@ -1083,6 +1210,72 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
                 Clôturer & Se déconnecter
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* SESSION EXPIRATION WARNING DIALOG */}
+      {showExpiryWarning && (
+        <div className="fixed inset-0 z-[99999] bg-[#0E0F11]/90 backdrop-blur-[10px] flex items-center justify-center px-4" id="pms-session-warning-modal">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-6 border border-amber-200 animate-fade-in text-left relative overflow-hidden">
+            {/* Top Amber Stripe Accent */}
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-amber-500"></div>
+
+            <div className="flex items-center space-x-4 mb-4 mt-2">
+              <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center shrink-0 animate-pulse">
+                <Clock size={24} />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900 tracking-tight">Session presque expirée</h3>
+                <p className="text-xs text-amber-600 font-bold tracking-wide">Sécurité d'accès PMS</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 mb-6">
+              <p className="text-sm text-slate-600 leading-relaxed font-semibold">
+                Par mesure de sécurité hôtelière et conformément aux politiques de confidentialité, votre session de connexion active sera fermée automatiquement dans :
+              </p>
+              <div className="py-3 px-4 bg-amber-50/50 rounded-xl border border-amber-100 flex items-center justify-between">
+                <span className="text-xs text-amber-800 font-bold uppercase tracking-wider">Temps restant :</span>
+                <span className="text-lg font-black text-amber-600 font-mono tracking-wide animate-pulse">
+                  {Math.floor(expirySecondsLeft / 60)} min {expirySecondsLeft % 60 < 10 ? '0' : ''}{expirySecondsLeft % 60} s
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 font-medium">
+                Voulez-vous prolonger votre session de 24 heures et rester connecté sur ce terminal ?
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={onLogout}
+                className="flex-1 border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-bold py-3 rounded-xl transition-all cursor-pointer text-center"
+              >
+                Déconnexion
+              </button>
+              <button
+                type="button"
+                onClick={handleExtendSession}
+                className="flex-1 bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-white text-xs font-black py-3 rounded-xl transition-all cursor-pointer text-center flex items-center justify-center gap-2 shadow-lg shadow-amber-500/15"
+              >
+                <Clock size={14} />
+                <span>Rester connecté</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SESSION EXTENSION SUCCESS TOAST */}
+      {expirySuccess && (
+        <div className="fixed bottom-6 right-6 z-[99999] bg-slate-900 text-white rounded-xl shadow-2xl p-4 border border-slate-800 animate-slide-up flex items-center space-x-3 max-w-sm" id="pms-session-success-toast">
+          <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center shrink-0">
+            <ShieldAlert size={16} className="text-emerald-400" />
+          </div>
+          <div>
+            <p className="text-xs font-black text-white">Session prolongée !</p>
+            <p className="text-[10px] text-slate-400 font-medium mt-0.5">Accès renouvelé avec succès pour 24h.</p>
           </div>
         </div>
       )}

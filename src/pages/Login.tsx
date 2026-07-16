@@ -19,15 +19,46 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const [hotelLogo] = useState<string | null>(() => localStorage.getItem('hotelLogo'));
-  const [hotelName] = useState<string>(() => localStorage.getItem('hotelName') || 'Brunch Bouaké');
+  const [hotelLogo, setHotelLogo] = useState<string | null>(() => localStorage.getItem('hotelLogo'));
+  const [hotelName, setHotelName] = useState<string>(() => localStorage.getItem('hotelName') || 'Brunch Resto-Bar Vip');
 
-  // Load remembered credentials on mount
+  // Load credentials and load hotel settings dynamically on mount
   useEffect(() => {
     const rememberedEmail = localStorage.getItem('pms_remembered_email');
     const rememberedPassword = localStorage.getItem('pms_remembered_password');
     if (rememberedEmail) setEmail(rememberedEmail);
     if (rememberedPassword) setPassword(rememberedPassword);
+
+    const loadSettings = async () => {
+      try {
+        const res = await fetch('/api/settings/hotel');
+        const data = await res.json();
+        if (data.success && data.settings) {
+          const s = data.settings;
+          setHotelName(s.hotel_name || 'Brunch Resto-Bar Vip');
+          setHotelLogo(s.logo || null);
+          localStorage.setItem('hotelName', s.hotel_name || 'Brunch Resto-Bar Vip');
+          if (s.logo) {
+            localStorage.setItem('hotelLogo', s.logo);
+          } else {
+            localStorage.removeItem('hotelLogo');
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load hotel settings in login screen:', err);
+      }
+    };
+    loadSettings();
+
+    const handleConfigChange = () => {
+      setHotelName(localStorage.getItem('hotelName') || 'Brunch Resto-Bar Vip');
+      setHotelLogo(localStorage.getItem('hotelLogo'));
+    };
+
+    window.addEventListener('hotel-config-changed', handleConfigChange);
+    return () => {
+      window.removeEventListener('hotel-config-changed', handleConfigChange);
+    };
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
