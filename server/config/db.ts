@@ -60,6 +60,11 @@ if (useMySQL) {
       }
       if (isMySQLOnline) {
         try {
+          await pool!.query("ALTER TABLE `users` ADD COLUMN `must_change_password` BOOLEAN DEFAULT TRUE");
+          console.log('[Database MySQL] Ensured `must_change_password` column exists in `users`.');
+        } catch (e) {}
+
+        try {
           await pool!.query("ALTER TABLE `hotel_settings` ADD COLUMN `extra_config` LONGTEXT NULL");
           console.log('[Database MySQL] Ensured `extra_config` column exists in `hotel_settings`.');
         } catch (e) {}

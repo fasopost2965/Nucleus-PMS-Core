@@ -117,9 +117,7 @@ export default function Admin() {
       }
     }
     if (!field || field === 'password') {
-      if (!formPassword) {
-        errors.password = 'Le mot de passe temporaire est obligatoire.';
-      } else if (formPassword.length < 6) {
+      if (formPassword && formPassword.length < 6) {
         errors.password = '⚠️ Sécurité insuffisante : le mot de passe doit faire au moins 6 caractères.';
       }
     }
@@ -1260,10 +1258,10 @@ export default function Admin() {
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Mot de passe temporaire *</label>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Mot de passe (par défaut : 123456)</label>
                 <input
                   type="password"
-                  placeholder="Saisissez un mot de passe sécurisé"
+                  placeholder="Laisser vide pour utiliser le mot de passe par défaut (123456)"
                   value={formPassword}
                   onChange={(e) => { setFormPassword(e.target.value); validateForm('password'); }}
                   onBlur={() => validateForm('password')}

@@ -21,7 +21,7 @@ router.post('/auth/login', async (req, res, next) => {
     }
 
     const users = await db.getCollection('users');
-    const user = users.find((u: any) => u.email.toLowerCase() === email.toLowerCase());
+    const user = users.find((u: any) => u.email && u.email.toLowerCase() === email.toLowerCase());
 
     if (!user) {
       return res.status(401).json({
@@ -86,7 +86,8 @@ router.post('/auth/login', async (req, res, next) => {
         lastName: user.last_name,
         email: user.email,
         role: user.role || 'Super Administrateur',
-        privileges: getUserPrivilegesList(user)
+        privileges: getUserPrivilegesList(user),
+        mustChangePassword: !!user.must_change_password
       }
     });
   } catch (err) {
@@ -218,7 +219,8 @@ router.post('/auth/change-password', async (req: AuthenticatedRequest, res, next
 
     const hashed = bcrypt.hashSync(newPassword, 10);
     await db.update('users', user.id, {
-      password_hash: hashed
+      password_hash: hashed,
+      must_change_password: false
     });
 
     return res.status(200).json({
@@ -278,7 +280,10 @@ router.post('/users', async (req: AuthenticatedRequest, res, next) => {
       return res.status(400).json({ success: false, error: { message: 'L\'adresse email saisie est invalide.' } });
     }
 
-    if (!password || password.length < 6) {
+    let finalPassword = password;
+    if (!finalPassword || !finalPassword.trim()) {
+      finalPassword = '123456';
+    } else if (finalPassword.length < 6) {
       return res.status(400).json({ success: false, error: { message: 'Le mot de passe temporaire doit contenir au moins 6 caractères.' } });
     }
 
@@ -297,7 +302,7 @@ router.post('/users', async (req: AuthenticatedRequest, res, next) => {
     }
 
     const users = await db.getCollection('users');
-    if (users.some((u: any) => u.email.toLowerCase() === email.toLowerCase())) {
+    if (users.some((u: any) => u.email && u.email.toLowerCase() === email.toLowerCase())) {
       return res.status(400).json({ success: false, error: { message: `Un compte utilisateur avec l'adresse email "${email}" existe déjà.` } });
     }
 
@@ -328,7 +333,7 @@ router.post('/users', async (req: AuthenticatedRequest, res, next) => {
       id: newId,
       role_id: role_id,
       email: email.toLowerCase().trim(),
-      password_hash: bcrypt.hashSync(password, 10),
+      password_hash: bcrypt.hashSync(finalPassword, 10),
       first_name: first_name.trim(),
       last_name: last_name.trim(),
       phone: phone ? phone.trim() : '',
@@ -336,6 +341,7 @@ router.post('/users', async (req: AuthenticatedRequest, res, next) => {
       role: role,
       timezone: 'Africa/Abidjan',
       privileges: privileges || ['/dashboard'],
+      must_change_password: true,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -389,7 +395,16 @@ router.put('/users/:id', async (req: AuthenticatedRequest, res, next) => {
     const updatedFields: any = {};
     if (first_name !== undefined) updatedFields.first_name = first_name;
     if (last_name !== undefined) updatedFields.last_name = last_name;
-    if (email !== undefined) updatedFields.email = email.toLowerCase();
+    if (email !== undefined) {
+      const emailTrimmed = email.toLowerCase().trim();
+      if (existingUser.email && existingUser.email.toLowerCase().trim() !== emailTrimmed) {
+        const users = await db.getCollection('users');
+        if (users.some((u: any) => u.id != id && u.email && u.email.toLowerCase().trim() === emailTrimmed)) {
+          return res.status(400).json({ success: false, error: { message: `Un autre compte utilisateur utilise déjà l'adresse email "${email}".` } });
+        }
+      }
+      updatedFields.email = emailTrimmed;
+    }
     if (phone !== undefined) updatedFields.phone = phone;
     if (role !== undefined) updatedFields.role = role;
     if (privileges !== undefined) updatedFields.privileges = privileges;
@@ -686,7 +701,8 @@ router.post('/auth/extend-session', async (req: AuthenticatedRequest, res, next)
         lastName: user.last_name,
         email: user.email,
         role: user.role || 'Super Administrateur',
-        privileges: getUserPrivilegesList(user)
+        privileges: getUserPrivilegesList(user),
+        mustChangePassword: !!user.must_change_password
       }
     });
   } catch (err) {
@@ -753,7 +769,8 @@ router.get('/auth/verify', async (req: AuthenticatedRequest, res, next) => {
         lastName: user.last_name,
         email: user.email,
         role: user.role || 'Super Administrateur',
-        privileges: getUserPrivilegesList(user)
+        privileges: getUserPrivilegesList(user),
+        mustChangePassword: !!user.must_change_password
       }
     });
   } catch (err) {
@@ -1365,10 +1382,15 @@ import { getInitialSeedData, writeDB, readDB } from '../config/db';
 router.post('/system/purge', async (req, res, next) => {
   try {
     const currentData = readDB();
+    const seedBase = getInitialSeedData();
     
     // Create a blank data structure keeping only critical system parameters
     const purgedData = {
-      ...getInitialSeedData(),
+      ...seedBase,
+      hotel_settings: {
+        ...(seedBase.hotel_settings || {}),
+        app_mode: 'production'
+      } as any,
       rooms: [],
       reservations: [],
       guests: [],
@@ -1405,10 +1427,84 @@ router.post('/system/purge', async (req, res, next) => {
   }
 });
 
+
+// ==========================================
+// 10. SYSTEM SYNCHRONIZATION ENDPOINTS
+// ==========================================
+
+const nameMap: Record<string, string> = {
+  'pms_rooms': 'rooms',
+  'pms_reservations': 'reservations',
+  'pms_guests': 'guests',
+  'pms_suppliers': 'suppliers',
+  'pms_stock': 'stock_items',
+  'pms_stock_movements': 'stock_movements',
+  'pms_housekeeping_tasks': 'housekeeping_tasks',
+  'pms_maintenance_tickets': 'maintenance_tickets',
+  'pms_payments': 'payments',
+  'pms_invoices': 'invoices',
+  'pms_restaurant_orders': 'restaurant_orders',
+  'pms_employees': 'employees',
+  'hrms_employees': 'hrms_employees',
+  'hrms_departments': 'hrms_departments',
+  'hrms_jobs': 'hrms_jobs',
+  'hrms_teams': 'hrms_teams',
+  'hrms_contracts': 'hrms_contracts',
+  'hrms_skills': 'hrms_skills',
+  'hrms_employee_skills': 'hrms_employee_skills',
+  'hrms_onboarding_tasks': 'hrms_onboarding_tasks',
+  'hrms_business_events': 'hrms_business_events',
+  'hrms_payroll_rules': 'hrms_payroll_rules'
+};
+
+router.get('/system/sync', async (req, res, next) => {
+  try {
+    const settingsList = await db.getCollection('hotel_settings');
+    const settings = settingsList[0] || {};
+    const appMode = settings.app_mode || 'demo';
+    
+    const collections: Record<string, any> = {};
+    for (const [localKey, serverCol] of Object.entries(nameMap)) {
+      collections[localKey] = await db.getCollection(serverCol) || [];
+    }
+    
+    return res.status(200).json({
+      success: true,
+      appMode,
+      collections
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/system/sync', async (req, res, next) => {
+  try {
+    const { collectionName, data } = req.body;
+    if (!collectionName || !Array.isArray(data)) {
+      return res.status(400).json({ success: false, error: { message: 'Données de collection manquantes ou invalides.' } });
+    }
+    
+    const serverCol = nameMap[collectionName];
+    if (!serverCol) {
+      return res.status(400).json({ success: false, error: { message: `La collection "${collectionName}" n'est pas reconnue.` } });
+    }
+    
+    await db.saveCollection(serverCol, data);
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/system/seed', async (req, res, next) => {
   try {
+    const seedData = getInitialSeedData();
+    if (seedData.hotel_settings) {
+      (seedData.hotel_settings as any).app_mode = 'demo';
+    }
     // Reset back to standard mock/seed data
-    writeDB(getInitialSeedData());
+    writeDB(seedData);
     return res.status(200).json({ 
       success: true, 
       message: 'Les données de démonstration du serveur ont été restaurées avec succès.' 

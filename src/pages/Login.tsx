@@ -8,7 +8,7 @@ import { LogIn, Key, Mail, ShieldAlert, Eye, EyeOff, ArrowLeft, Lock, RefreshCw,
 import { api } from '../utils/api';
 
 interface LoginProps {
-  onLoginSuccess: (user: { name: string; role: string; email: string }) => void;
+  onLoginSuccess: (user: { name: string; role: string; email: string; mustChangePassword?: boolean }) => void;
 }
 
 export default function Login({ onLoginSuccess }: LoginProps) {
@@ -94,7 +94,8 @@ export default function Login({ onLoginSuccess }: LoginProps) {
         onLoginSuccess({
           name: `${res.user.firstName || ''} ${res.user.lastName || ''}`.trim() || res.user.name || 'Utilisateur',
           role: res.user.role || 'Super Administrateur',
-          email: res.user.email
+          email: res.user.email,
+          mustChangePassword: res.user.mustChangePassword
         });
         setIsLoading(false);
         return;

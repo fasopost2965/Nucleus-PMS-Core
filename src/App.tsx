@@ -15,6 +15,7 @@ import AppLayout from './components/layout/AppLayout';
 
 // Module pages
 import Login from './pages/Login';
+import ForcePasswordChange from './components/ForcePasswordChange';
 import Dashboard from './pages/Dashboard';
 import Reception from './pages/Reception';
 import Rooms from './pages/Rooms';
@@ -32,10 +33,48 @@ import HRMS from './pages/HRMS';
 
 import { useTimesheetLog } from './hooks/useTimesheetLog';
 
+// Declare custom window syncing flag
+declare global {
+  interface Window {
+    __pms_is_syncing?: boolean;
+  }
+}
+
+// Automatic Client-to-Server collection synchronization engine
+if (typeof window !== 'undefined') {
+  const originalSetItem = localStorage.setItem;
+  localStorage.setItem = function (key, value) {
+    originalSetItem.apply(this, arguments as any);
+    
+    // Only synchronize collections and if not currently doing a batch load/sync
+    if (!window.__pms_is_syncing && (key.startsWith('pms_') || key.startsWith('hrms_'))) {
+      const token = localStorage.getItem('pms_jwt_token');
+      if (token) {
+        try {
+          const parsedData = JSON.parse(value);
+          if (Array.isArray(parsedData)) {
+            fetch('/api/system/sync', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({ collectionName: key, data: parsedData })
+            }).catch(err => console.warn('[PMS Sync] Failed to sync collection to server:', key, err));
+          }
+        } catch (e) {
+          // Ignore non-JSON or non-array mutations
+        }
+      }
+    }
+  };
+}
+
 interface IUser {
   name: string;
   role: string;
   email: string;
+  mustChangePassword?: boolean;
 }
 
 export default function App() {
@@ -59,6 +98,44 @@ export default function App() {
     return !!localStorage.getItem('pms_jwt_token');
   });
 
+  // Fetch system mode and all collections to synchronize local storage
+  const syncDatabaseWithServer = async () => {
+    const token = localStorage.getItem('pms_jwt_token');
+    if (!token) return;
+    
+    try {
+      window.__pms_is_syncing = true; // prevent automatic setItem override from looping
+      
+      const res = await fetch('/api/system/sync', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const data = await res.json();
+      if (data.success && data.collections) {
+        localStorage.setItem('appMode', data.appMode || 'demo');
+        if (data.appMode === 'production') {
+          localStorage.setItem('pms_db_purged', 'true');
+        } else {
+          localStorage.removeItem('pms_db_purged');
+        }
+        
+        // Write all synchronized collections to local storage
+        for (const [localKey, list] of Object.entries(data.collections)) {
+          localStorage.setItem(localKey, JSON.stringify(list));
+        }
+        
+        // Trigger events to refresh any active views
+        window.dispatchEvent(new Event('pms-data-synced'));
+        window.dispatchEvent(new Event('hotel-config-changed'));
+      }
+    } catch (err) {
+      console.error('Failed to sync database with server:', err);
+    } finally {
+      window.__pms_is_syncing = false;
+    }
+  };
+
   const handleLogin = (loggedUser: IUser) => {
     logLogin({
       name: loggedUser.name,
@@ -67,6 +144,8 @@ export default function App() {
     });
     setUser(loggedUser);
     localStorage.setItem('pms_user', JSON.stringify(loggedUser));
+    // Trigger synchronization immediately after login
+    syncDatabaseWithServer();
   };
 
   const handleLogout = () => {
@@ -119,6 +198,8 @@ export default function App() {
         if (res && res.success && res.user) {
           setUser(res.user);
           localStorage.setItem('pms_user', JSON.stringify(res.user));
+          // Synchronize database state with the server immediately
+          await syncDatabaseWithServer();
         } else {
           handleLogout();
         }
@@ -172,6 +253,22 @@ export default function App() {
     return (
       <ToastProvider>
         <Login onLoginSuccess={handleLogin} />
+      </ToastProvider>
+    );
+  }
+
+  // If user is logged in but must change password on first connection
+  if (user && user.mustChangePassword) {
+    return (
+      <ToastProvider>
+        <ForcePasswordChange 
+          user={user} 
+          onLogout={handleLogout} 
+          onPasswordChanged={(updatedUser) => {
+            setUser(updatedUser);
+            localStorage.setItem('pms_user', JSON.stringify(updatedUser));
+          }} 
+        />
       </ToastProvider>
     );
   }

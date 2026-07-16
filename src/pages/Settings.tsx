@@ -537,6 +537,8 @@ export default function SettingsPage() {
   const handleResetToDemoData = async () => {
     if (confirm('⚠️ Attention : Cette action va écraser TOUTES vos données actuelles (chambres, réservations, factures, stocks) et restaurer le jeu de données de démonstration de Brunch Resto-Bar VIP Bouaké. Continuer ?')) {
       try {
+        window.__pms_is_syncing = true; // Block automatic individual sync requests during bulk write
+        
         const token = localStorage.getItem('pms_jwt_token');
         if (token) {
           await fetch('/api/system/seed', {
@@ -562,7 +564,7 @@ export default function SettingsPage() {
         localStorage.setItem('tvaRate', '18');
         localStorage.setItem('touristTaxEnabled', 'true');
         localStorage.setItem('touristTaxAmt', '1000');
-        localStorage.setItem('appMode', 'production');
+        localStorage.setItem('appMode', 'demo'); // FIX: Set appMode to demo instead of production
         localStorage.setItem('backupEnabled', 'true');
         localStorage.setItem('defaultCurrency', 'XOF');
         localStorage.setItem('hotelLogo', 'PRESET_VIP_LOGO');
@@ -580,17 +582,21 @@ export default function SettingsPage() {
         setSuccessMsg('Le système a été réinitialisé avec succès avec les données de démonstration d\'origine ! Rechargement en cours...');
         triggerConfigRefresh();
         setTimeout(() => {
+          window.__pms_is_syncing = false;
           window.location.reload();
         }, 1500);
       } catch (err) {
+        window.__pms_is_syncing = false;
         setErrorMsg('Erreur lors de la réinitialisation de la démo.');
       }
     }
   };
 
   const handleClearAllDatabase = async () => {
-    if (confirm('❌ DANGER : Cette action va effacer l\'intégralité des données locales de l\'application (Aucune sauvegarde locale). L\'application sera vierge et prête pour accueillir vos vraies données de Brunch Bouaké. Êtes-vous absolument sûr ?')) {
+    if (confirm(`❌ DANGER : Cette action va effacer l'intégralité des données locales de l'application (Aucune sauvegarde locale). L'application sera vierge et prête pour accueillir vos vraies données de Brunch Bouaké. Êtes-vous absolument sûr ?`)) {
       try {
+        window.__pms_is_syncing = true; // Block automatic individual sync requests during bulk write
+        
         // Keep active session keys
         const pmsUser = localStorage.getItem('pms_user');
         const pmsToken = localStorage.getItem('pms_jwt_token');
@@ -615,6 +621,7 @@ export default function SettingsPage() {
 
         // Set the purged flag so that empty state is prioritized and mock fallbacks are bypassed
         localStorage.setItem('pms_db_purged', 'true');
+        localStorage.setItem('appMode', 'production'); // Set appMode to production on database clear
 
         // Seed empty structure placeholders to prevent fallback to demo data
         localStorage.setItem('hotelName', 'Brunch Bouaké');
@@ -646,12 +653,14 @@ export default function SettingsPage() {
         localStorage.setItem('hrms_business_events', JSON.stringify([]));
         localStorage.setItem('hrms_payroll_rules', JSON.stringify([]));
         
-        setSuccessMsg('Base de données vidée ! L\'application est désormais vierge et prête pour vos données réelles. Rechargement du PMS...');
+        setSuccessMsg(`Base de données vidée ! L'application est désormais vierge et prête pour vos données réelles. Rechargement du PMS...`);
         triggerConfigRefresh();
         setTimeout(() => {
+          window.__pms_is_syncing = false;
           window.location.reload();
         }, 1500);
       } catch (err) {
+        window.__pms_is_syncing = false;
         setErrorMsg('Erreur lors du nettoyage de la base de données.');
       }
     }
