@@ -422,7 +422,9 @@ export function getInitialSeedData() {
       { id: 2, role_id: 2, module_name: 'hrms', is_enabled: true },
       { id: 3, role_id: 3, module_name: 'restaurant', is_enabled: true }
     ],
-    backups: []
+    backups: [],
+    connection_journal: [],
+    timesheet_history: []
   };
 }
 

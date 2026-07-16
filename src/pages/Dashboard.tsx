@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 import { StatCard, AlertBanner } from '../components/ui/pms-ui';
 import WelcomeNotification from '../components/WelcomeNotification';
-import { mockRooms, mockReservations, mockActivityLogs, mockGuests } from '../mockData';
+import { mockRooms, mockReservations, mockActivityLogs, mockGuests, mockRoomCategories } from '../mockData';
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { getRoomsList, getStock, logManualStockMovement } from '../stockService';
 import { api } from '../utils/api';
@@ -43,6 +43,13 @@ export default function Dashboard() {
   const isPurged = localStorage.getItem('pms_db_purged') === 'true';
 
   const [rooms, setRooms] = useState(() => getRoomsList());
+  const [categories, setCategories] = useState<any[]>(() => {
+    const stored = localStorage.getItem('pms_room_categories');
+    if (stored) {
+      try { return JSON.parse(stored); } catch (e) {}
+    }
+    return mockRoomCategories;
+  });
   const [stock, setStock] = useState(() => getStock());
   const [reservations, setReservations] = useState(() => {
     const stored = localStorage.getItem('pms_reservations');
@@ -71,13 +78,18 @@ export default function Dashboard() {
     let active = true;
     const loadApiData = async () => {
       try {
-        const [resList, roomsList] = await Promise.all([
+        const [resList, roomsList, catsList] = await Promise.all([
           api.getReservations(),
-          api.getRooms()
+          api.getRooms(),
+          api.getRoomCategories().catch(() => [])
         ]);
         if (active) {
           setApiReservations(resList);
           setApiRooms(roomsList);
+          if (catsList && catsList.length > 0) {
+            setCategories(catsList);
+            localStorage.setItem('pms_room_categories', JSON.stringify(catsList));
+          }
         }
       } catch (err) {
         console.error("Error fetching API data in Dashboard:", err);
@@ -311,23 +323,32 @@ export default function Dashboard() {
     .reduce((acc, item) => acc + item.current_stock, 0);
 
   // Graphical Data
-  const occupancyData = isPurged ? [
-    { name: 'Lun', Standard: 0, Suite: 0, Deluxe: 0 },
-    { name: 'Mar', Standard: 0, Suite: 0, Deluxe: 0 },
-    { name: 'Mer', Standard: 0, Suite: 0, Deluxe: 0 },
-    { name: 'Jeu', Standard: 0, Suite: 0, Deluxe: 0 },
-    { name: 'Ven', Standard: 0, Suite: 0, Deluxe: 0 },
-    { name: 'Sam', Standard: 0, Suite: 0, Deluxe: 0 },
-    { name: 'Dim', Standard: 0, Suite: 0, Deluxe: 0 },
-  ] : [
-    { name: 'Lun', Standard: 65, Suite: 50, Deluxe: 70 },
-    { name: 'Mar', Standard: 70, Suite: 60, Deluxe: 80 },
-    { name: 'Mer', Standard: 80, Suite: 70, Deluxe: 90 },
-    { name: 'Jeu', Standard: 75, Suite: 80, Deluxe: 85 },
-    { name: 'Ven', Standard: 90, Suite: 90, Deluxe: 95 },
-    { name: 'Sam', Standard: 95, Suite: 100, Deluxe: 100 },
-    { name: 'Dim', Standard: 85, Suite: 80, Deluxe: 90 },
-  ];
+  const occupancyData = React.useMemo(() => {
+    const days = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+    const firstCatName = categories[0]?.name || 'Standard';
+    const secondCatName = categories[1]?.name || 'Deluxe';
+    const thirdCatName = categories[2]?.name || 'Suite';
+
+    const baseValues = [
+      { first: 65, second: 70, third: 50 },
+      { first: 70, second: 80, third: 60 },
+      { first: 80, second: 90, third: 70 },
+      { first: 75, second: 85, third: 80 },
+      { first: 90, second: 95, third: 90 },
+      { first: 95, second: 100, third: 100 },
+      { first: 85, second: 90, third: 80 }
+    ];
+
+    return days.map((day, idx) => {
+      const val = isPurged ? { first: 0, second: 0, third: 0 } : baseValues[idx];
+      return {
+        name: day,
+        [firstCatName]: val.first,
+        [secondCatName]: val.second,
+        [thirdCatName]: val.third
+      };
+    });
+  }, [categories, isPurged]);
 
   const revenueData = isPurged ? [
     { name: '07/07', Chambres: 0, Restaurant: 0, Total: 0 },
@@ -844,8 +865,8 @@ export default function Dashboard() {
                 <XAxis dataKey="name" stroke="#94A3B8" fontSize={11} tickLine={false} />
                 <YAxis stroke="#94A3B8" fontSize={11} tickLine={false} />
                 <Tooltip />
-                <Area type="monotone" dataKey="Deluxe" stroke="#D45D1A" fillOpacity={1} fill="url(#colorDlx)" />
-                <Area type="monotone" dataKey="Suite" stroke="#4F46E5" fillOpacity={1} fill="url(#colorSuite)" />
+                <Area type="monotone" dataKey={categories[1]?.name || 'Deluxe'} stroke="#D45D1A" fillOpacity={1} fill="url(#colorDlx)" />
+                <Area type="monotone" dataKey={categories[2]?.name || 'Suite'} stroke="#4F46E5" fillOpacity={1} fill="url(#colorSuite)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>

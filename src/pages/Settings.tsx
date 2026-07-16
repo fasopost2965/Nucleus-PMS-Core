@@ -233,14 +233,22 @@ export default function SettingsPage() {
       try {
         const token = localStorage.getItem('pms_jwt_token');
         if (!token) return;
-        const res = await fetch('/api/settings/hotel', {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
-        const data = await res.json();
-        if (data.success && data.settings) {
-          const s = data.settings;
+        
+        // Fetch hotel settings and room categories in parallel
+        const [resSettings, cats] = await Promise.all([
+          fetch('/api/settings/hotel', {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          }).then(r => r.json()),
+          api.getRoomCategories().catch(e => {
+            console.warn('Fallback loading categories:', e);
+            return [];
+          })
+        ]);
+
+        if (resSettings.success && resSettings.settings) {
+          const s = resSettings.settings;
           if (s.hotel_name || s.hotelName) setHotelName(s.hotel_name || s.hotelName);
           if (s.legal_name || s.legalName) setLegalName(s.legal_name || s.legalName);
           if (s.phone || s.hotelPhone) setPhone(s.phone || s.hotelPhone);
@@ -248,6 +256,11 @@ export default function SettingsPage() {
           if (s.website || s.hotelWebsite) setWebsite(s.website || s.hotelWebsite);
           if (s.address || s.hotelAddress) setAddress(s.address || s.hotelAddress);
           if (s.logo !== undefined) setLogo(s.logo);
+        }
+
+        if (cats && cats.length > 0) {
+          setCategories(cats);
+          localStorage.setItem('pms_room_categories', JSON.stringify(cats));
         }
       } catch (err) {
         console.error('Failed to fetch settings from DB:', err);
@@ -324,22 +337,25 @@ export default function SettingsPage() {
       // 7. Save to server database as well
       const token = localStorage.getItem('pms_jwt_token');
       if (token) {
-        await fetch('/api/settings/hotel', {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            hotel_name: hotelName,
-            legal_name: legalName,
-            phone,
-            email,
-            website,
-            address,
-            logo
-          })
-        });
+        await Promise.all([
+          fetch('/api/settings/hotel', {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              hotel_name: hotelName,
+              legal_name: legalName,
+              phone,
+              email,
+              website,
+              address,
+              logo
+            })
+          }),
+          api.updateRoomCategories(categories)
+        ]);
       }
 
       triggerConfigRefresh();
@@ -539,13 +555,17 @@ export default function SettingsPage() {
       try {
         window.__pms_is_syncing = true; // Block automatic individual sync requests during bulk write
         
-        const token = localStorage.getItem('pms_jwt_token');
-        if (token) {
+        // Keep active session keys
+        const pmsUser = localStorage.getItem('pms_user');
+        const pmsToken = localStorage.getItem('pms_jwt_token');
+        const hotelLogo = localStorage.getItem('hotelLogo');
+
+        if (pmsToken) {
           await fetch('/api/system/seed', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
+              'Authorization': `Bearer ${pmsToken}`
             }
           });
         }
@@ -553,6 +573,11 @@ export default function SettingsPage() {
         localStorage.clear();
         localStorage.removeItem('pms_db_purged');
         
+        // Restore active session keys
+        if (pmsUser) localStorage.setItem('pms_user', pmsUser);
+        if (pmsToken) localStorage.setItem('pms_jwt_token', pmsToken);
+        if (hotelLogo) localStorage.setItem('hotelLogo', hotelLogo);
+
         // Repopulate standard config
         localStorage.setItem('hotelName', 'Brunch Resto-Bar Vip');
         localStorage.setItem('legalName', 'Brunch Resto-Bar Vip SARL');

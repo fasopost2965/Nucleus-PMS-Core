@@ -1361,6 +1361,28 @@ router.get('/hrms/business-events', async (req, res, next) => {
 // ==========================================
 // 8. HOTEL SETTINGS ENDPOINTS
 // ==========================================
+router.get('/room_categories', async (req, res, next) => {
+  try {
+    const categories = await db.getCollection('room_categories');
+    return res.status(200).json({ success: true, categories });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/room_categories', async (req, res, next) => {
+  try {
+    const { categories } = req.body;
+    if (!categories || !Array.isArray(categories)) {
+      return res.status(400).json({ success: false, error: { message: 'Données de catégories invalides.' } });
+    }
+    await db.saveCollection('room_categories', categories);
+    return res.status(200).json({ success: true, categories });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.put('/settings/hotel', async (req, res, next) => {
   try {
     const settingsList = await db.getCollection('hotel_settings');
@@ -1392,6 +1414,7 @@ router.post('/system/purge', async (req, res, next) => {
         app_mode: 'production'
       } as any,
       rooms: [],
+      room_categories: seedBase.room_categories, // Keep default room categories
       reservations: [],
       guests: [],
       invoices: [],
@@ -1401,6 +1424,8 @@ router.post('/system/purge', async (req, res, next) => {
       stock_items: [],
       stock_movements: [],
       restaurant_orders: [],
+      connection_journal: [],
+      timesheet_history: [],
       hrms_employees: [],
       hrms_contracts: [],
       hrms_onboarding_tasks: [],
@@ -1434,6 +1459,7 @@ router.post('/system/purge', async (req, res, next) => {
 
 const nameMap: Record<string, string> = {
   'pms_rooms': 'rooms',
+  'pms_room_categories': 'room_categories',
   'pms_reservations': 'reservations',
   'pms_guests': 'guests',
   'pms_suppliers': 'suppliers',
@@ -1445,6 +1471,8 @@ const nameMap: Record<string, string> = {
   'pms_invoices': 'invoices',
   'pms_restaurant_orders': 'restaurant_orders',
   'pms_employees': 'employees',
+  'pms_connection_journal': 'connection_journal',
+  'pms_timesheet_history': 'timesheet_history',
   'hrms_employees': 'hrms_employees',
   'hrms_departments': 'hrms_departments',
   'hrms_jobs': 'hrms_jobs',

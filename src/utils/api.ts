@@ -107,6 +107,12 @@ export const api = {
   updateRoom: (id: string, data: any) => request(`/rooms/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteRoom: (id: string) => request(`/rooms/${id}`, { method: 'DELETE' }),
 
+  getRoomCategories: async (): Promise<any[]> => {
+    const res = await request('/room_categories');
+    return res.categories || [];
+  },
+  updateRoomCategories: (categories: any[]) => request('/room_categories', { method: 'PUT', body: JSON.stringify({ categories }) }),
+
   // Guests API
   getGuests: async (): Promise<any[]> => {
     const res = await request('/guests');

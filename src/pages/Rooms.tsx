@@ -30,7 +30,13 @@ export default function Rooms() {
   // Operational states loaded into React state for REST API readiness
   const isPurged = localStorage.getItem('pms_db_purged') === 'true';
   const [rooms, setRooms] = useState<IRoom[]>(() => isPurged ? [] : mockRooms);
-  const [categories, setCategories] = useState<IRoomCategory[]>(mockRoomCategories);
+  const [categories, setCategories] = useState<IRoomCategory[]>(() => {
+    const stored = localStorage.getItem('pms_room_categories');
+    if (stored) {
+      try { return JSON.parse(stored); } catch (e) {}
+    }
+    return mockRoomCategories;
+  });
   const [amenities, setAmenities] = useState<IAmenity[]>(mockAmenities);
   const [reservations, setReservations] = useState(() => isPurged ? [] : mockReservations);
   const [guests, setGuests] = useState(() => isPurged ? [] : mockGuests);
@@ -45,6 +51,15 @@ export default function Rooms() {
         setRooms(loadedRooms || []);
       } catch (e) {
         console.warn('Rooms API fallback:', e);
+      }
+      try {
+        const loadedCats = await api.getRoomCategories();
+        if (loadedCats && loadedCats.length > 0) {
+          setCategories(loadedCats);
+          localStorage.setItem('pms_room_categories', JSON.stringify(loadedCats));
+        }
+      } catch (e) {
+        console.warn('Categories API fallback:', e);
       }
       try {
         const loadedGuests = await api.getGuests();
