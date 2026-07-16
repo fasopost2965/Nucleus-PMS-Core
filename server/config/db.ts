@@ -17,21 +17,22 @@ const useMySQL = !!DB_HOST;
 if (useMySQL) {
   try {
     pool = mysql.createPool({
-      host: DB_HOST,
-      user: DB_USER,
-      password: DB_PASSWORD,
-      database: DB_NAME,
-      port: DB_PORT,
+      host: process.env.DB_HOST || "localhost",
+      user: process.env.DB_USER || "u707543112_brunch_pms",
+      password: process.env.DB_PASSWORD || "Prodesk@2965",
+      database: process.env.DB_NAME || "u707543112_brunch_pms",
+      port: process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 3306,
       waitForConnections: true,
       connectionLimit: 10,
       queueLimit: 0
     });
-    console.log('[Database] MySQL Connection Pool initialized.');
+    console.log("[Database] MySQL Connection Pool initialized.");
   } catch (err: any) {
-    console.error('[Database] Failed to initialize MySQL Pool, using JSON storage fallback.', err.message);
+    console.error("[Database] Failed to initialize MySQL Pool, using JSON storage fallback.", err.message);
     pool = null;
   }
 }
+
 
 // JSON Fallback storage config
 const JSON_DB_DIR = path.join(process.cwd(), 'server', 'data');
