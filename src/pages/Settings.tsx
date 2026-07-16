@@ -407,8 +407,8 @@ export default function SettingsPage() {
   };
 
   // EMPLOYEES LOGIC
-  const handleAddEmployee = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddEmployee = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!newEmployee.first_name || !newEmployee.last_name) return;
 
     const added: Employee = {
@@ -1623,7 +1623,7 @@ export default function SettingsPage() {
                           </button>
                         </div>
 
-                        <form onSubmit={handleAddEmployee} className="p-5 space-y-3.5 text-xs font-semibold">
+                        <div className="p-5 space-y-3.5 text-xs font-semibold">
                           <div className="grid grid-cols-2 gap-3">
                             <div className="space-y-1">
                               <label className="text-slate-700">Prénom <span className="text-red-500">*</span></label>
@@ -1695,13 +1695,14 @@ export default function SettingsPage() {
                               Annuler
                             </button>
                             <button
-                              type="submit"
-                              className="px-5 py-2 bg-brand-orange text-white rounded-lg hover:bg-brand-orange-hover cursor-pointer"
+                              type="button"
+                              onClick={() => handleAddEmployee()}
+                              className="px-5 py-2 bg-brand-orange text-white rounded-lg hover:bg-brand-orange-hover cursor-pointer font-bold"
                             >
                               Enregistrer l'accès
                             </button>
                           </div>
-                        </form>
+                        </div>
                       </div>
                     </div>
                   )}
