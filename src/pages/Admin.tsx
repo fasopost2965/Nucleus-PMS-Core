@@ -32,6 +32,17 @@ export default function Admin() {
   const [formRole, setFormRole] = useState('Réceptionniste');
   const [formPhone, setFormPhone] = useState('');
 
+  // Edit user modal state
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<string | number | null>(null);
+  const [editFirstName, setEditFirstName] = useState('');
+  const [editLastName, setEditLastName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editPassword, setEditPassword] = useState('');
+  const [editRole, setEditRole] = useState('Réceptionniste');
+  const [editPhone, setEditPhone] = useState('');
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
+
   // Diagnostics & schema states
   const [dbDiagnostics, setDbDiagnostics] = useState<any>(null);
   const [diagLoading, setDiagLoading] = useState(false);
@@ -226,6 +237,97 @@ export default function Admin() {
         toast.showError(`Échec de la réinitialisation : ${err.message}`);
         setTimeout(() => setErrorMsg(''), 4000);
       }
+    }
+  };
+
+  const handleEditUserClick = (u: any) => {
+    setEditingUserId(u.id);
+    setEditFirstName(u.first_name || u.firstName || (u.name ? u.name.split(' ')[0] : ''));
+    setEditLastName(u.last_name || u.lastName || (u.name ? u.name.split(' ').slice(1).join(' ') : ''));
+    setEditEmail(u.email || '');
+    setEditPhone(u.phone || '');
+    setEditRole(u.role || 'Réceptionniste');
+    setEditPassword('');
+    setEditErrors({});
+    setShowEditModal(true);
+  };
+
+  const validateEditForm = (field?: string) => {
+    const errors: Record<string, string> = {};
+
+    if (!field || field === 'firstName') {
+      if (!editFirstName.trim()) errors.firstName = 'Le prénom de l\'employé est obligatoire.';
+    }
+    if (!field || field === 'lastName') {
+      if (!editLastName.trim()) errors.lastName = 'Le nom de l\'employé est obligatoire.';
+    }
+    if (!field || field === 'email') {
+      if (!editEmail.trim()) {
+        errors.email = 'L\'adresse email est obligatoire.';
+      } else {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(editEmail)) {
+          errors.email = 'Format d\'adresse email incorrect (ex: nom@domaine.com).';
+        } else if (users.some(u => u.id !== editingUserId && u.email?.toLowerCase() === editEmail.toLowerCase())) {
+          errors.email = '⚠️ Doublon : cette adresse email est déjà utilisée par un autre employé !';
+        }
+      }
+    }
+    if (!field || field === 'password') {
+      if (editPassword && editPassword.length < 6) {
+        errors.password = '⚠️ Sécurité insuffisante : le mot de passe doit faire au moins 6 caractères.';
+      }
+    }
+
+    if (field) {
+      setEditErrors(prev => {
+        const updated = { ...prev };
+        if (errors[field]) {
+          updated[field] = errors[field];
+        } else {
+          delete updated[field];
+        }
+        return updated;
+      });
+    } else {
+      setEditErrors(errors);
+    }
+
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleSaveUserEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUserId) return;
+
+    if (!validateEditForm()) {
+      toast.showError('Veuillez corriger les erreurs de validation dans le formulaire.');
+      return;
+    }
+
+    try {
+      const dataToUpdate: any = {
+        first_name: editFirstName,
+        last_name: editLastName,
+        email: editEmail,
+        phone: editPhone,
+        role: editRole,
+      };
+
+      if (editPassword.trim()) {
+        dataToUpdate.password = editPassword;
+      }
+
+      await api.updateUser(editingUserId, dataToUpdate);
+      setSuccessMsg(`Compte de "${editFirstName} ${editLastName}" mis à jour avec succès.`);
+      toast.showSuccess(`Compte mis à jour avec succès !`);
+      setShowEditModal(false);
+      setEditingUserId(null);
+      await loadUsers();
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err: any) {
+      console.error('[API Admin] User edit failed:', err);
+      toast.showError(`Échec de la modification : ${err.message || 'Erreur serveur'}`);
     }
   };
 
@@ -648,6 +750,15 @@ export default function Admin() {
                           </td>
                           <td className="py-3.5 px-6 text-right">
                             <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => handleEditUserClick(u)}
+                                className="bg-blue-50 hover:bg-blue-100 text-blue-600 font-bold text-[10px] px-2 py-1 border border-blue-200 rounded-lg cursor-pointer flex items-center space-x-1"
+                                title="Modifier les informations ou le mot de passe de cet utilisateur"
+                              >
+                                <Key size={10} />
+                                <span>Modifier</span>
+                              </button>
+
                               <button
                                 onClick={() => handleEditPrivileges(u)}
                                 className="bg-orange-50 hover:bg-orange-100 text-brand-orange font-bold text-[10px] px-2 py-1 border border-orange-200 rounded-lg cursor-pointer flex items-center space-x-1"
@@ -1327,6 +1438,132 @@ export default function Admin() {
                   className="bg-brand-orange hover:bg-brand-orange-hover text-white font-bold text-xs px-5 py-2 rounded-lg cursor-pointer transition-all shadow-md shadow-brand-orange/10"
                 >
                   Créer le compte
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT USER MODAL */}
+      {showEditModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 text-slate-800">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-md w-full overflow-hidden animate-fade-in">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <h3 className="text-xs uppercase font-extrabold tracking-wider text-slate-900 flex items-center space-x-1.5">
+                <Users size={14} className="text-blue-600" />
+                <span>Modifier le compte employé</span>
+              </h3>
+              <button 
+                onClick={() => setShowEditModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 hover:bg-slate-100 rounded-lg cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveUserEdit} className="p-6 space-y-4 text-left">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Prénom *</label>
+                  <input
+                    type="text"
+                    placeholder="Amadou"
+                    value={editFirstName}
+                    onChange={(e) => { setEditFirstName(e.target.value); validateEditForm('firstName'); }}
+                    onBlur={() => validateEditForm('firstName')}
+                    className={`w-full px-3 py-2 border rounded-lg text-xs focus:outline-none focus:border-blue-500 bg-slate-50 focus:bg-white ${editErrors.firstName ? 'border-rose-500 bg-rose-50/20' : 'border-slate-200'}`}
+                  />
+                  {editErrors.firstName && (
+                    <span className="text-[10px] font-bold text-rose-600 block mt-0.5">{editErrors.firstName}</span>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Nom *</label>
+                  <input
+                    type="text"
+                    placeholder="Koné"
+                    value={editLastName}
+                    onChange={(e) => { setEditLastName(e.target.value); validateEditForm('lastName'); }}
+                    onBlur={() => validateEditForm('lastName')}
+                    className={`w-full px-3 py-2 border rounded-lg text-xs focus:outline-none focus:border-blue-500 bg-slate-50 focus:bg-white ${editErrors.lastName ? 'border-rose-500 bg-rose-50/20' : 'border-slate-200'}`}
+                  />
+                  {editErrors.lastName && (
+                    <span className="text-[10px] font-bold text-rose-600 block mt-0.5">{editErrors.lastName}</span>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Adresse email *</label>
+                <input
+                  type="email"
+                  placeholder="nom@brunchbouake.com"
+                  value={editEmail}
+                  onChange={(e) => { setEditEmail(e.target.value); validateEditForm('email'); }}
+                  onBlur={() => validateEditForm('email')}
+                  className={`w-full px-3 py-2 border rounded-lg text-xs focus:outline-none focus:border-blue-500 bg-slate-50 focus:bg-white ${editErrors.email ? 'border-rose-500 bg-rose-50/20' : 'border-slate-200'}`}
+                />
+                {editErrors.email && (
+                  <span className="text-[10px] font-bold text-rose-600 block mt-0.5">{editErrors.email}</span>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Nouveau Mot de passe (Laisser vide pour ne pas modifier)</label>
+                <input
+                  type="password"
+                  placeholder="Saisissez un nouveau mot de passe (min. 6 caractères)"
+                  value={editPassword}
+                  onChange={(e) => { setEditPassword(e.target.value); validateEditForm('password'); }}
+                  onBlur={() => validateEditForm('password')}
+                  className={`w-full px-3 py-2 border rounded-lg text-xs focus:outline-none focus:border-blue-500 bg-slate-50 focus:bg-white ${editErrors.password ? 'border-rose-500 bg-rose-50/20' : 'border-slate-200'}`}
+                />
+                {editErrors.password && (
+                  <span className="text-[10px] font-bold text-rose-600 block mt-0.5">{editErrors.password}</span>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Téléphone portable</label>
+                <input
+                  type="text"
+                  placeholder="+225 07 45 89 12 34"
+                  value={editPhone}
+                  onChange={(e) => setEditPhone(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-blue-500 bg-slate-50 focus:bg-white"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Rôle d'habilitation système *</label>
+                <select
+                  value={editRole}
+                  onChange={(e) => setEditRole(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-blue-500 bg-slate-50 focus:bg-white font-medium text-slate-700 cursor-pointer"
+                >
+                  <option value="Super Administrateur">Super Administrateur</option>
+                  <option value="Réceptionniste">Réceptionniste / Front Desk</option>
+                  <option value="Housekeeping">Housekeeping / Gouvernance</option>
+                  <option value="Technicien Maintenance">Technicien Maintenance</option>
+                  <option value="Magasinier / Stock">Magasinier / Stock</option>
+                  <option value="Support Technique">Support Technique</option>
+                </select>
+              </div>
+
+              <div className="pt-2 flex items-center justify-end space-x-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => { setShowEditModal(false); setEditErrors({}); }}
+                  className="bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs px-4 py-2 border border-slate-200 rounded-lg cursor-pointer transition-colors"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-5 py-2 rounded-lg cursor-pointer transition-all shadow-md shadow-blue-600/10"
+                >
+                  Enregistrer les modifications
                 </button>
               </div>
             </form>
