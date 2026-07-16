@@ -3,6 +3,7 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import apiRouter from './server/routes/api';
 import { errorHandler } from './server/middlewares/errorHandler';
+import { startBackupScheduler } from './server/config/scheduler';
 
 async function startServer() {
   const app = express();
@@ -71,6 +72,8 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Server] Success! Nucleus PMS Core running on http://0.0.0.0:${PORT}`);
+    // Start automated 24h backup scheduler
+    startBackupScheduler();
   });
 }
 

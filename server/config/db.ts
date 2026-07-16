@@ -12,6 +12,25 @@ const DB_PORT = process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 3306;
 
 let pool: mysql.Pool | null = null;
 const useMySQL = !!DB_HOST;
+let isMySQLOnline = useMySQL;
+
+function isConnectionError(err: any): boolean {
+  if (!err) return false;
+  const msg = (err.message || '').toUpperCase();
+  const code = (err.code || '').toUpperCase();
+  return (
+    code.includes('ECONNREFUSED') ||
+    code.includes('ENOTFOUND') ||
+    code.includes('ETIMEDOUT') ||
+    code.includes('EHOSTUNREACH') ||
+    code.includes('PROTOCOL_CONNECTION_LOST') ||
+    code.includes('HANDSHAKE_TIMEOUT') ||
+    code.includes('ER_ACCESS_DENIED_ERROR') ||
+    msg.includes('ECONNREFUSED') ||
+    msg.includes('CONNREFUSED') ||
+    msg.includes('ACCESS DENIED')
+  );
+}
 
 // Initialize MySQL Pool if config exists
 if (useMySQL) {
@@ -28,20 +47,116 @@ if (useMySQL) {
     });
     console.log('[Database] MySQL Connection Pool initialized.');
 
-    // Asynchronously verify/add columns to the hotel_settings table
+    // Asynchronously verify/add columns to the hotel_settings table and create config tables
     (async () => {
       try {
-        await pool.query("ALTER TABLE `hotel_settings` ADD COLUMN `logo` LONGTEXT NULL");
+        await pool!.query("ALTER TABLE `hotel_settings` ADD COLUMN `logo` LONGTEXT NULL");
         console.log('[Database MySQL] Ensured `logo` column exists in `hotel_settings`.');
-      } catch (e) {}
-      try {
-        await pool.query("ALTER TABLE `hotel_settings` ADD COLUMN `extra_config` LONGTEXT NULL");
-        console.log('[Database MySQL] Ensured `extra_config` column exists in `hotel_settings`.');
-      } catch (e) {}
+      } catch (e: any) {
+        if (isConnectionError(e)) {
+          isMySQLOnline = false;
+          console.warn('[Database MySQL] Connection refused or lost during initialization. Switched silently to Local JSON Fallback.');
+        }
+      }
+      if (isMySQLOnline) {
+        try {
+          await pool!.query("ALTER TABLE `hotel_settings` ADD COLUMN `extra_config` LONGTEXT NULL");
+          console.log('[Database MySQL] Ensured `extra_config` column exists in `hotel_settings`.');
+        } catch (e) {}
+
+        try {
+          await pool!.query(`
+            CREATE TABLE IF NOT EXISTS \`backups\` (
+              \`id\` BIGINT PRIMARY KEY,
+              \`backup_type\` VARCHAR(50) NOT NULL,
+              \`backup_data\` LONGTEXT NOT NULL,
+              \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+          `);
+          console.log('[Database MySQL] Ensured `backups` table exists.');
+        } catch (e: any) {
+          console.warn('[Database MySQL] Failed to ensure `backups` table:', e.message);
+        }
+
+        try {
+          await pool!.query(`
+            CREATE TABLE IF NOT EXISTS \`settings\` (
+              \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+              \`key_name\` VARCHAR(100) UNIQUE NOT NULL,
+              \`value_text\` TEXT,
+              \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+          `);
+          console.log('[Database MySQL] Ensured `settings` table exists.');
+        } catch (e: any) {
+          console.warn('[Database MySQL] Failed to ensure `settings` table:', e.message);
+        }
+
+        try {
+          await pool!.query(`
+            CREATE TABLE IF NOT EXISTS \`system_config\` (
+              \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+              \`config_name\` VARCHAR(100) UNIQUE NOT NULL,
+              \`config_value\` TEXT,
+              \`description\` VARCHAR(255)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+          `);
+          console.log('[Database MySQL] Ensured `system_config` table exists.');
+        } catch (e: any) {
+          console.warn('[Database MySQL] Failed to ensure `system_config` table:', e.message);
+        }
+
+        try {
+          await pool!.query(`
+            CREATE TABLE IF NOT EXISTS \`module_access\` (
+              \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+              \`role_id\` INT NOT NULL,
+              \`module_name\` VARCHAR(100) NOT NULL,
+              \`is_enabled\` BOOLEAN DEFAULT TRUE,
+              \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+          `);
+          console.log('[Database MySQL] Ensured `module_access` table exists.');
+        } catch (e: any) {
+          console.warn('[Database MySQL] Failed to ensure `module_access` table:', e.message);
+        }
+
+        // Seed initial records for these tables in MySQL if empty
+        try {
+          const [settingsRows]: any = await pool!.query('SELECT COUNT(*) as count FROM `settings`');
+          if (settingsRows[0]?.count === 0) {
+            await pool!.query("INSERT INTO `settings` (`key_name`, `value_text`) VALUES ('backup_interval_hours', '24'), ('maintenance_mode', 'false')");
+            console.log('[Database MySQL] Seeded default settings records.');
+          }
+        } catch (e: any) {
+          console.warn('[Database MySQL] Failed to seed `settings` table:', e.message);
+        }
+
+        try {
+          const [configRows]: any = await pool!.query('SELECT COUNT(*) as count FROM `system_config`');
+          if (configRows[0]?.count === 0) {
+            await pool!.query("INSERT INTO `system_config` (`config_name`, `config_value`, `description`) VALUES ('pms_version', '3.0', 'Version majeure du système'), ('allowed_ip_range', '*', 'Plage IP autorisée pour l\\'accès administratif')");
+            console.log('[Database MySQL] Seeded default system_config records.');
+          }
+        } catch (e: any) {
+          console.warn('[Database MySQL] Failed to seed `system_config` table:', e.message);
+        }
+
+        try {
+          const [accessRows]: any = await pool!.query('SELECT COUNT(*) as count FROM `module_access`');
+          if (accessRows[0]?.count === 0) {
+            await pool!.query("INSERT INTO `module_access` (`role_id`, `module_name`, `is_enabled`) VALUES (1, 'finance', 1), (2, 'hrms', 1), (3, 'restaurant', 1)");
+            console.log('[Database MySQL] Seeded default module_access records.');
+          }
+        } catch (e: any) {
+          console.warn('[Database MySQL] Failed to seed `module_access` table:', e.message);
+        }
+      }
     })();
   } catch (err: any) {
     console.error('[Database] Failed to initialize MySQL Pool, using JSON storage fallback.', err.message);
     pool = null;
+    isMySQLOnline = false;
   }
 }
 
@@ -288,7 +403,21 @@ export function getInitialSeedData() {
         ip_address: '192.168.1.10',
         created_at: new Date(Date.now() - 3600000 * 0.5).toISOString() // 30 mins ago
       }
-    ]
+    ],
+    settings: [
+      { id: 1, key_name: 'backup_interval_hours', value_text: '24' },
+      { id: 2, key_name: 'maintenance_mode', value_text: 'false' }
+    ],
+    system_config: [
+      { id: 1, config_name: 'pms_version', config_value: '3.0', description: 'Version majeure du système' },
+      { id: 2, config_name: 'allowed_ip_range', config_value: '*', description: 'Plage IP autorisée pour l\'accès administratif' }
+    ],
+    module_access: [
+      { id: 1, role_id: 1, module_name: 'finance', is_enabled: true },
+      { id: 2, role_id: 2, module_name: 'hrms', is_enabled: true },
+      { id: 3, role_id: 3, module_name: 'restaurant', is_enabled: true }
+    ],
+    backups: []
   };
 }
 
@@ -325,7 +454,7 @@ export function writeDB(data: any): void {
 // General DB abstraction API
 export const db = {
   getCollection: async (name: string): Promise<any[]> => {
-    if (useMySQL && pool) {
+    if (useMySQL && pool && isMySQLOnline) {
       try {
         const [rows] = await pool.query(`SELECT * FROM \`${name}\``);
         const mysqlRecords = rows as any[];
@@ -344,13 +473,34 @@ export const db = {
           return localRecords;
         }
         
+        // Special case: if table is 'users' and both are empty, auto-seed default seed data
+        if (name === 'users') {
+          console.log(`[Database MySQL] Users table is completely empty. Seeding defaults.`);
+          const initialData = getInitialSeedData();
+          await db.saveCollection('users', initialData.users);
+          return initialData.users;
+        }
+        
         return [];
       } catch (err: any) {
-        console.error(`[Database MySQL] Error reading ${name}, falling back to local JSON:`, err.message);
+        if (isConnectionError(err)) {
+          isMySQLOnline = false;
+          console.warn(`[Database MySQL] Connection lost or refused while reading ${name}. Switched silently to Local JSON Fallback.`);
+        } else {
+          console.error(`[Database MySQL] Error reading ${name}, falling back to local JSON:`, err.message);
+        }
       }
     }
     const data = readDB();
-    return data[name] || [];
+    let records = data[name] || [];
+    if (name === 'users' && records.length === 0) {
+      console.log(`[Database] Users collection is completely empty in local JSON. Seeding defaults.`);
+      const initialData = getInitialSeedData();
+      records = initialData.users;
+      data.users = records;
+      writeDB(data);
+    }
+    return records;
   },
 
   saveCollection: async (name: string, records: any[]): Promise<void> => {
@@ -359,13 +509,18 @@ export const db = {
     writeDB(data);
     
     // Attempt sync if MySQL is active
-    if (useMySQL && pool) {
+    if (useMySQL && pool && isMySQLOnline) {
       try {
         if (records.length === 0) {
           try {
             await pool.query(`DELETE FROM \`${name}\``);
           } catch (e: any) {
-            console.warn(`[Database MySQL] Failed to clear table ${name}:`, e.message);
+            if (isConnectionError(e)) {
+              isMySQLOnline = false;
+              console.warn(`[Database MySQL] Connection lost during clear table ${name}. Switched silently to Local JSON Fallback.`);
+            } else {
+              console.warn(`[Database MySQL] Failed to clear table ${name}:`, e.message);
+            }
           }
           return;
         }
@@ -405,7 +560,12 @@ export const db = {
         }
         console.log(`[Database MySQL] Successfully synchronized ${records.length} records to table ${name}.`);
       } catch (err: any) {
-        console.error(`[Database MySQL] Sync error for ${name}:`, err.message);
+        if (isConnectionError(err)) {
+          isMySQLOnline = false;
+          console.warn(`[Database MySQL] Connection lost during synchronization for ${name}. Switched silently to Local JSON Fallback.`);
+        } else {
+          console.error(`[Database MySQL] Sync error for ${name}:`, err.message);
+        }
       }
     }
   },
@@ -441,5 +601,213 @@ export const db = {
     
     await db.saveCollection(collectionName, filtered);
     return true;
+  },
+
+  getDiagnostics: async () => {
+    const start = Date.now();
+    let latency = 0;
+    let connected = false;
+    let error: string | null = null;
+    const tableCounts: Record<string, number> = {};
+
+    const tableNames = [
+      'users', 'roles', 'role_permissions', 'hotel_settings', 'room_categories', 'rooms', 
+      'amenities', 'guests', 'reservations', 'invoices', 'payments', 
+      'housekeeping_tasks', 'maintenance_tickets', 'stock_items', 
+      'restaurant_menu_items', 'restaurant_orders', 'hrms_departments',
+      'settings', 'system_config', 'module_access'
+    ];
+
+    if (useMySQL && pool) {
+      try {
+        await pool.query('SELECT 1');
+        latency = Date.now() - start;
+        connected = true;
+        isMySQLOnline = true; // Reset back to true if manual diagnostics succeeded
+
+        for (const table of tableNames) {
+          try {
+            const [rows]: any = await pool.query(`SELECT COUNT(*) as count FROM \`${table}\``);
+            tableCounts[table] = rows[0]?.count || 0;
+          } catch (e: any) {
+            tableCounts[table] = 0;
+          }
+        }
+      } catch (err: any) {
+        error = err.message;
+        connected = false;
+        if (isConnectionError(err)) {
+          isMySQLOnline = false;
+        }
+      }
+    }
+
+    if (!connected) {
+      try {
+        const data = readDB();
+        latency = Date.now() - start;
+        for (const table of tableNames) {
+          tableCounts[table] = Array.isArray(data[table]) ? data[table].length : (data[table] ? 1 : 0);
+        }
+      } catch (err: any) {
+        error = err.message;
+      }
+    }
+
+    return {
+      useMySQL,
+      connected: connected && useMySQL,
+      engine: useMySQL && connected ? 'MySQL Database' : 'Local JSON File Fallback',
+      host: DB_HOST,
+      port: DB_PORT,
+      database: DB_NAME,
+      user: DB_USER,
+      latency,
+      error,
+      tableCounts
+    };
+  },
+
+  inspectUsersSchema: async () => {
+    if (useMySQL && pool && isMySQLOnline) {
+      try {
+        const [columns]: any = await pool.query('SHOW COLUMNS FROM `users`');
+        let indexes: any[] = [];
+        try {
+          const [indexRows]: any = await pool.query('SHOW INDEX FROM `users`');
+          indexes = indexRows;
+        } catch (e) {}
+
+        return {
+          success: true,
+          engine: 'MySQL',
+          columns: columns.map((col: any) => ({
+            field: col.Field,
+            type: col.Type,
+            null: col.Null,
+            key: col.Key,
+            default: col.Default,
+            extra: col.Extra
+          })),
+          indexes: indexes.map((idx: any) => ({
+            table: idx.Table,
+            non_unique: idx.Non_unique,
+            key_name: idx.Key_name,
+            column_name: idx.Column_name
+          }))
+        };
+      } catch (err: any) {
+        if (isConnectionError(err)) {
+          isMySQLOnline = false;
+        }
+        return {
+          success: false,
+          engine: 'MySQL',
+          error: err.message
+        };
+      }
+    }
+    return {
+      success: true,
+      engine: 'JSON',
+      columns: [
+        { field: 'id', type: 'string/number', null: 'NO', key: 'PRI', default: null, extra: '' },
+        { field: 'email', type: 'string', null: 'NO', key: 'UNI', default: null, extra: '' },
+        { field: 'password_hash', type: 'string', null: 'NO', key: '', default: null, extra: '' },
+        { field: 'first_name', type: 'string', null: 'YES', key: '', default: null, extra: '' },
+        { field: 'last_name', type: 'string', null: 'YES', key: '', default: null, extra: '' },
+        { field: 'phone', type: 'string', null: 'YES', key: '', default: null, extra: '' },
+        { field: 'status', type: 'string', null: 'NO', key: '', default: 'active', extra: '' },
+        { field: 'role', type: 'string', null: 'NO', key: '', default: 'Réceptionniste', extra: '' },
+        { field: 'privileges', type: 'JSON', null: 'YES', key: '', default: null, extra: '' }
+      ],
+      indexes: []
+    };
+  },
+
+  backup: async () => {
+    const data: any = {};
+    const tableNames = [
+      'users', 'roles', 'role_permissions', 'hotel_settings', 'room_categories', 'rooms', 
+      'amenities', 'guests', 'reservations', 'invoices', 'payments', 
+      'housekeeping_tasks', 'maintenance_tickets', 'stock_items', 
+      'restaurant_menu_items', 'restaurant_orders', 'hrms_departments',
+      'settings', 'system_config', 'module_access'
+    ];
+
+    if (useMySQL && pool && isMySQLOnline) {
+      for (const table of tableNames) {
+        try {
+          const [rows] = await pool.query(`SELECT * FROM \`${table}\``);
+          data[table] = rows;
+        } catch (e: any) {
+          if (isConnectionError(e)) {
+            isMySQLOnline = false;
+            console.warn(`[Database Backup] Connection lost while backing up ${table}. Switched silently to Local JSON Fallback.`);
+          } else {
+            console.warn(`[Database Backup] Failed to read ${table} from MySQL:`, e.message);
+          }
+          const local = readDB();
+          data[table] = local[table] || [];
+        }
+      }
+    } else {
+      const local = readDB();
+      for (const table of tableNames) {
+        data[table] = local[table] || [];
+      }
+    }
+    return data;
+  },
+
+  restore: async (backupData: any) => {
+    const tableNames = [
+      'users', 'roles', 'role_permissions', 'hotel_settings', 'room_categories', 'rooms', 
+      'amenities', 'guests', 'reservations', 'invoices', 'payments', 
+      'housekeeping_tasks', 'maintenance_tickets', 'stock_items', 
+      'restaurant_menu_items', 'restaurant_orders', 'hrms_departments',
+      'settings', 'system_config', 'module_access'
+    ];
+
+    const current = readDB();
+    const merged = { ...current };
+
+    for (const table of tableNames) {
+      if (backupData[table] !== undefined) {
+        merged[table] = backupData[table];
+      }
+    }
+
+    writeDB(merged);
+
+    if (useMySQL && pool && isMySQLOnline) {
+      for (const table of tableNames) {
+        try {
+          try {
+            await pool.query(`DELETE FROM \`${table}\``);
+          } catch (e: any) {
+            if (isConnectionError(e)) {
+              isMySQLOnline = false;
+              console.warn(`[Database Restore] Connection lost during clear of ${table}. Switched silently to Local JSON Fallback.`);
+            } else {
+              console.warn(`[Database Restore] Failed to clean ${table} before restore:`, e.message);
+            }
+          }
+          
+          if (isMySQLOnline) {
+            const records = merged[table];
+            if (records) {
+              const recordsArray = Array.isArray(records) ? records : [records];
+              if (recordsArray.length > 0) {
+                await db.saveCollection(table, recordsArray);
+              }
+            }
+          }
+        } catch (e: any) {
+          console.error(`[Database Restore] Failed to restore table ${table} to MySQL:`, e.message);
+        }
+      }
+    }
+    return { success: true, restoredTables: Object.keys(backupData) };
   }
 };

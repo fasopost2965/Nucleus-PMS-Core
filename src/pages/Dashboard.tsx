@@ -63,6 +63,32 @@ export default function Dashboard() {
   const [loadingActivities, setLoadingActivities] = useState(true);
   const [successMsg, setSuccessMsg] = useState('');
 
+  const [apiReservations, setApiReservations] = useState<any[]>([]);
+  const [apiRooms, setApiRooms] = useState<any[]>([]);
+  const [loadingApiData, setLoadingApiData] = useState(true);
+
+  React.useEffect(() => {
+    let active = true;
+    const loadApiData = async () => {
+      try {
+        const [resList, roomsList] = await Promise.all([
+          api.getReservations(),
+          api.getRooms()
+        ]);
+        if (active) {
+          setApiReservations(resList);
+          setApiRooms(roomsList);
+        }
+      } catch (err) {
+        console.error("Error fetching API data in Dashboard:", err);
+      } finally {
+        if (active) setLoadingApiData(false);
+      }
+    };
+    loadApiData();
+    return () => { active = false; };
+  }, []);
+
   // Currently logged-in user details for welcome banner
   const [currentUser] = useState(() => {
     const saved = localStorage.getItem('pms_user');
@@ -253,11 +279,31 @@ export default function Dashboard() {
   };
 
   // Calculate quick stats dynamically from state
-  const totalRooms = rooms.length;
-  const occupiedRooms = rooms.filter(r => r.current_status === 'Occupée').length;
-  const maintenanceRooms = rooms.filter(r => r.current_status === 'Maintenance').length;
-  const availableRooms = rooms.filter(r => r.current_status === 'Libre').length;
-  const occupancyRate = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
+  const activeReservations = apiReservations.length > 0 ? apiReservations : reservations;
+  const activeRooms = apiRooms.length > 0 ? apiRooms : rooms;
+
+  const totalRooms = activeRooms.length;
+  const occupiedRooms = activeRooms.filter((r: any) => r.current_status === 'Occupée' || r.current_status === 'Occupated').length;
+  const maintenanceRooms = activeRooms.filter((r: any) => r.current_status === 'Maintenance').length;
+  const availableRooms = activeRooms.filter((r: any) => r.current_status === 'Libre' || r.current_status === 'Disponible').length;
+
+  const todayStr = '2026-07-16';
+  // Today's occupancy rate based on reservations overlapping today
+  const todayReservations = activeReservations.filter((r: any) => {
+    return r.arrival_date <= todayStr && r.departure_date >= todayStr && r.status !== 'Annulée' && r.status !== 'No Show';
+  });
+  const activeOccupiedRoomsCount = todayReservations.length;
+  const activeTotalRoomsCount = totalRooms || 10;
+  const computedOccupancyRate = Math.min(100, Math.round((activeOccupiedRoomsCount / activeTotalRoomsCount) * 100));
+
+  const occupancyRate = computedOccupancyRate;
+
+  // New reservations created today or with arrival_date today
+  const newReservationsToday = activeReservations.filter((r: any) => {
+    const isArrivingToday = r.arrival_date === todayStr;
+    const isCreatedToday = r.created_at && r.created_at.startsWith(todayStr);
+    return (isArrivingToday || isCreatedToday) && r.status !== 'Annulée';
+  }).length;
   
   // Calculate pending laundry workload count (sum of dirty stock items)
   const pendingLaundryCount = stock
@@ -505,6 +551,86 @@ export default function Dashboard() {
           icon={Wrench}
           color="red"
         />
+      </div>
+
+      {/* RÉSUMÉ VISUEL DES RÉSERVATIONS DU JOUR */}
+      <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-md relative overflow-hidden text-left transition-all hover:shadow-lg">
+        {/* Decorative subtle ambient soft gradient */}
+        <div className="absolute -right-16 -top-16 w-48 h-48 rounded-full bg-brand-orange/5 blur-3xl pointer-events-none"></div>
+        <div className="absolute -left-16 -bottom-16 w-48 h-48 rounded-full bg-slate-100 blur-3xl pointer-events-none"></div>
+
+        <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          {/* Left Column: Summary Text */}
+          <div className="space-y-3.5 max-w-xl">
+            <div className="flex items-center space-x-2">
+              <span className="p-1.5 bg-brand-orange/10 text-brand-orange rounded-lg border border-brand-orange/20 flex items-center justify-center">
+                <Calendar size={14} />
+              </span>
+              <span className="text-[10px] uppercase font-black tracking-widest text-brand-orange">Synthèse opérationnelle</span>
+            </div>
+            
+            <h2 className="text-lg font-extrabold tracking-tight text-slate-900">Réservations du Jour & Taux d'Occupation</h2>
+            <p className="text-xs text-slate-600 leading-relaxed font-medium">
+              Aujourd'hui, l'activité hôtelière enregistre <strong className="text-brand-orange font-extrabold">{newReservationsToday} nouvelle(s) réservation(s)</strong> actives ou créées ce jour. Le taux d'occupation de votre parc hôtelier est actuellement de <strong className="text-emerald-600 font-extrabold">{computedOccupancyRate}%</strong>.
+            </p>
+
+            <div className="flex flex-wrap gap-2 pt-1">
+              <span className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-bold text-slate-600 flex items-center space-x-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-brand-orange animate-pulse"></span>
+                <span>{newReservationsToday} Nouvelle(s)</span>
+              </span>
+              <span className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-bold text-slate-600 flex items-center space-x-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                <span>{todayReservations.length} En séjour</span>
+              </span>
+              <span className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-bold text-slate-600 flex items-center space-x-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                <span>{activeRooms.length} Chambres au total</span>
+              </span>
+            </div>
+          </div>
+
+          {/* Right Column: Visual Progress and Indicators */}
+          <div className="flex flex-col sm:flex-row items-center gap-6 shrink-0 lg:border-l lg:border-slate-200 lg:pl-8">
+            {/* Visual Indicator 1: New Reservations */}
+            <div className="flex flex-col items-center text-center space-y-1 p-4 bg-slate-50/80 rounded-xl border border-slate-200/60 min-w-[140px] w-full sm:w-auto">
+              <span className="text-[9px] uppercase font-black tracking-wider text-slate-500">Nouvelles Rés.</span>
+              <div className="text-3xl font-black text-brand-orange">{newReservationsToday}</div>
+              <span className="text-[9px] text-slate-500 font-bold">Créées / Arrivées ce jour</span>
+            </div>
+
+            {/* Visual Indicator 2: Occupancy Rate Radial / Ring */}
+            <div className="flex items-center space-x-4 p-4 bg-slate-50/80 rounded-xl border border-slate-200/60 min-w-[190px] w-full sm:w-auto justify-center sm:justify-start">
+              <div className="relative w-12 h-12 shrink-0 flex items-center justify-center">
+                {/* SVG Progress Circle */}
+                <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                  <path
+                    className="text-slate-200"
+                    strokeWidth="3.5"
+                    stroke="currentColor"
+                    fill="none"
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                  />
+                  <path
+                    className="text-emerald-500"
+                    strokeWidth="3.5"
+                    strokeDasharray={`${computedOccupancyRate}, 100`}
+                    strokeLinecap="round"
+                    stroke="currentColor"
+                    fill="none"
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                  />
+                </svg>
+                <div className="absolute text-[11px] font-black text-slate-800">{computedOccupancyRate}%</div>
+              </div>
+              <div className="text-left space-y-0.5">
+                <span className="text-[9px] uppercase font-black tracking-wider text-slate-500 block">Taux d'occ.</span>
+                <div className="text-base font-black text-slate-800">{todayReservations.length} / {activeRooms.length}</div>
+                <span className="text-[9px] text-slate-500 font-bold block">Chambres occupées</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* COMPACT LOGISTICS / BLANCHISSERIE ALERT STRIP */}

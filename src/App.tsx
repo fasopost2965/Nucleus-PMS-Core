@@ -8,6 +8,7 @@ import { HashRouter, Routes, Route, Navigate, Link } from 'react-router-dom';
 import { ShieldAlert, ArrowLeft } from 'lucide-react';
 import { hasPermission } from './utils/permissions';
 import { api } from './utils/api';
+import { ToastProvider } from './context/ToastContext';
 
 // Core layout
 import AppLayout from './components/layout/AppLayout';
@@ -168,7 +169,11 @@ export default function App() {
 
   // If logged out, always redirect/render Login screen
   if (!user) {
-    return <Login onLoginSuccess={handleLogin} />;
+    return (
+      <ToastProvider>
+        <Login onLoginSuccess={handleLogin} />
+      </ToastProvider>
+    );
   }
 
   // AccessDenied component for beautiful inline feedback when a module is restricted
@@ -198,30 +203,32 @@ export default function App() {
   };
 
   return (
-    <HashRouter>
-      <AppLayout user={user} onLogout={handleLogout}>
-        <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/reception" element={<ProtectedRoute path="/reception" element={<Reception />} />} />
-          <Route path="/rooms" element={<ProtectedRoute path="/rooms" element={<Rooms />} />} />
-          <Route path="/reservations" element={<ProtectedRoute path="/reservations" element={<Reservations />} />} />
-          <Route path="/guests" element={<ProtectedRoute path="/guests" element={<Guests />} />} />
-          <Route path="/finance" element={<ProtectedRoute path="/finance" element={<Finance />} />} />
-          <Route path="/housekeeping" element={<ProtectedRoute path="/housekeeping" element={<Housekeeping />} />} />
-          <Route path="/maintenance" element={<ProtectedRoute path="/maintenance" element={<Maintenance />} />} />
-          <Route path="/restaurant" element={<ProtectedRoute path="/restaurant" element={<Restaurant />} />} />
-          <Route path="/inventory" element={<ProtectedRoute path="/inventory" element={<Inventory />} />} />
-          <Route path="/reports" element={<ProtectedRoute path="/reports" element={<Reports />} />} />
-          <Route path="/settings" element={<ProtectedRoute path="/settings" element={<SettingsPage />} />} />
-          <Route path="/admin" element={<ProtectedRoute path="/admin" element={<Admin />} />} />
-          <Route path="/hrms" element={<ProtectedRoute path="/hrms" element={<HRMS />} />} />
-          
-          {/* Catch-all fallback redirecting to dashboard */}
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
-        </Routes>
-      </AppLayout>
-    </HashRouter>
+    <ToastProvider>
+      <HashRouter>
+        <AppLayout user={user} onLogout={handleLogout}>
+          <Routes>
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/reception" element={<ProtectedRoute path="/reception" element={<Reception />} />} />
+            <Route path="/rooms" element={<ProtectedRoute path="/rooms" element={<Rooms />} />} />
+            <Route path="/reservations" element={<ProtectedRoute path="/reservations" element={<Reservations />} />} />
+            <Route path="/guests" element={<ProtectedRoute path="/guests" element={<Guests />} />} />
+            <Route path="/finance" element={<ProtectedRoute path="/finance" element={<Finance />} />} />
+            <Route path="/housekeeping" element={<ProtectedRoute path="/housekeeping" element={<Housekeeping />} />} />
+            <Route path="/maintenance" element={<ProtectedRoute path="/maintenance" element={<Maintenance />} />} />
+            <Route path="/restaurant" element={<ProtectedRoute path="/restaurant" element={<Restaurant />} />} />
+            <Route path="/inventory" element={<ProtectedRoute path="/inventory" element={<Inventory />} />} />
+            <Route path="/reports" element={<ProtectedRoute path="/reports" element={<Reports />} />} />
+            <Route path="/settings" element={<ProtectedRoute path="/settings" element={<SettingsPage />} />} />
+            <Route path="/admin" element={<ProtectedRoute path="/admin" element={<Admin />} />} />
+            <Route path="/hrms" element={<ProtectedRoute path="/hrms" element={<HRMS />} />} />
+            
+            {/* Catch-all fallback redirecting to dashboard */}
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          </Routes>
+        </AppLayout>
+      </HashRouter>
+    </ToastProvider>
   );
 }
 

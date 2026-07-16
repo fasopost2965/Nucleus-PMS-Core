@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { api } from '../utils/api';
 import { 
   Settings, 
   Save, 
@@ -67,7 +68,53 @@ interface Employee {
 export default function SettingsPage() {
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
-  const [activeTab, setActiveTab] = useState<'identity' | 'rooms' | 'services' | 'finance' | 'staff' | 'system'>('identity');
+  const [activeTab, setActiveTab] = useState<'identity' | 'rooms' | 'services' | 'finance' | 'staff' | 'system' | 'security'>('identity');
+
+  // Password modification states
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [pwdLoading, setPwdLoading] = useState(false);
+  const [pwdSuccess, setPwdSuccess] = useState('');
+  const [pwdError, setPwdError] = useState('');
+
+  const handlePasswordChangeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwdError('');
+    setPwdSuccess('');
+    
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setPwdError('Tous les champs sont obligatoires.');
+      return;
+    }
+    
+    if (newPassword !== confirmPassword) {
+      setPwdError('Le nouveau mot de passe et sa confirmation ne correspondent pas.');
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setPwdError('Le nouveau mot de passe doit contenir au moins 6 caractères.');
+      return;
+    }
+
+    setPwdLoading(true);
+    try {
+      const res = await api.changePassword({ currentPassword, newPassword });
+      if (res && res.success) {
+        setPwdSuccess('Votre mot de passe a été modifié avec succès !');
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+      } else {
+        setPwdError(res.error?.message || 'Une erreur est survenue.');
+      }
+    } catch (err: any) {
+      setPwdError(err.message || 'Le mot de passe actuel est incorrect.');
+    } finally {
+      setPwdLoading(false);
+    }
+  };
   
   // 1. HOTEL IDENTITY STATES
   const [hotelName, setHotelName] = useState(() => localStorage.getItem('hotelName') || 'Brunch Resto-Bar Vip');
@@ -713,6 +760,19 @@ export default function SettingsPage() {
                 >
                   <RefreshCw size={14} />
                   <span>6. Système & Maintenance</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('security')}
+                  className={`w-full py-2.5 px-3 rounded-lg text-xs font-bold flex items-center space-x-2.5 transition-all cursor-pointer ${
+                    activeTab === 'security' 
+                      ? 'bg-brand-orange text-white shadow-sm font-extrabold' 
+                      : 'hover:bg-slate-800 hover:text-white'
+                  }`}
+                >
+                  <Shield size={14} />
+                  <span>7. Sécurité & Compte</span>
                 </button>
               </nav>
             </div>
@@ -1803,22 +1863,92 @@ export default function SettingsPage() {
                 </div>
               )}
 
+              {/* TAB 7: SECURITY & PASSWORD CHANGE */}
+              {activeTab === 'security' && (
+                <div className="space-y-6">
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-900">Modification du Mot de passe</h3>
+                    <p className="text-[11px] text-slate-500 font-medium">Pour assurer la sécurité de votre compte, changez régulièrement de mot de passe.</p>
+                  </div>
+
+                  <div className="max-w-md bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+                    {pwdSuccess && (
+                      <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 text-xs rounded-lg font-medium">
+                        {pwdSuccess}
+                      </div>
+                    )}
+                    {pwdError && (
+                      <div className="p-3 bg-red-50 border border-red-100 text-red-800 text-xs rounded-lg font-medium">
+                        {pwdError}
+                      </div>
+                    )}
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-700 block">Mot de passe actuel</label>
+                      <input
+                        type="password"
+                        required
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs focus:border-brand-orange focus:ring-1 focus:ring-brand-orange focus:outline-none font-medium"
+                        placeholder="••••••••"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-700 block">Nouveau mot de passe</label>
+                      <input
+                        type="password"
+                        required
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs focus:border-brand-orange focus:ring-1 focus:ring-brand-orange focus:outline-none font-medium"
+                        placeholder="Minimum 6 caractères"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-700 block">Confirmer le nouveau mot de passe</label>
+                      <input
+                        type="password"
+                        required
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs focus:border-brand-orange focus:ring-1 focus:ring-brand-orange focus:outline-none font-medium"
+                        placeholder="••••••••"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={pwdLoading}
+                      onClick={handlePasswordChangeSubmit}
+                      className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold py-2.5 px-5 rounded-lg transition-colors flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <span>{pwdLoading ? "Enregistrement..." : "Mettre à jour le mot de passe"}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
             </div>
 
             {/* SAVE ALL PREFERENCES SUBMIT FOOTER */}
-            <div className="pt-6 border-t border-slate-100 mt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div className="flex items-center space-x-1.5 text-[10px] text-slate-500 font-semibold self-start sm:self-auto">
-                <ShieldCheck size={12} className="text-emerald-600" />
-                <span>Tous les réglages sont sauvegardés localement (localStorage).</span>
+            {activeTab !== 'security' && (
+              <div className="pt-6 border-t border-slate-100 mt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center space-x-1.5 text-[10px] text-slate-500 font-semibold self-start sm:self-auto">
+                  <ShieldCheck size={12} className="text-emerald-600" />
+                  <span>Tous les réglages sont sauvegardés localement (localStorage).</span>
+                </div>
+                <button
+                  type="submit"
+                  className="bg-brand-orange hover:bg-brand-orange-hover text-white text-xs font-bold py-2.5 px-6 rounded-lg transition-colors flex items-center space-x-1.5 cursor-pointer shadow-md shadow-brand-orange/15 w-full sm:w-auto justify-center"
+                >
+                  <Save size={14} />
+                  <span>Enregistrer les Paramètres</span>
+                </button>
               </div>
-              <button
-                type="submit"
-                className="bg-brand-orange hover:bg-brand-orange-hover text-white text-xs font-bold py-2.5 px-6 rounded-lg transition-colors flex items-center space-x-1.5 cursor-pointer shadow-md shadow-brand-orange/15 w-full sm:w-auto justify-center"
-              >
-                <Save size={14} />
-                <span>Enregistrer les Paramètres</span>
-              </button>
-            </div>
+            )}
 
           </form>
 

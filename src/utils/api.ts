@@ -65,6 +65,24 @@ export const api = {
     }
     return res;
   },
+  forgotPassword: async (email: string): Promise<any> => {
+    return request('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email })
+    });
+  },
+  resetPassword: async (data: { email: string; code: string; newPassword: string }): Promise<any> => {
+    return request('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  },
+  changePassword: async (data: { currentPassword: string; newPassword: string }): Promise<any> => {
+    return request('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  },
   verifySession: async (): Promise<any> => {
     return request('/auth/verify', { method: 'GET' });
   },
@@ -96,6 +114,10 @@ export const api = {
   },
   createGuest: (data: any) => request('/guests', { method: 'POST', body: JSON.stringify(data) }),
   updateGuest: (id: string, data: any) => request(`/guests/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  getGuestHistory: async (id: string): Promise<any[]> => {
+    const res = await request(`/guests/history/${id}`);
+    return res.history || [];
+  },
 
   // Reservations API
   getReservations: async (): Promise<any[]> => {
@@ -162,5 +184,22 @@ export const api = {
   getBusinessEvents: async (): Promise<any[]> => {
     const res = await request('/hrms/business-events');
     return res.businessEvents || [];
-  }
+  },
+
+  // Users Management API
+  getUsers: async (): Promise<any[]> => {
+    const res = await request('/users');
+    return res.users || [];
+  },
+  createUser: (data: any) => request('/users', { method: 'POST', body: JSON.stringify(data) }),
+  updateUser: (id: string | number, data: any) => request(`/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteUser: (id: string | number) => request(`/users/${id}`, { method: 'DELETE' }),
+
+  // Administration & Diagnostics API
+  getDbDiagnostics: () => request('/admin/db-diagnostics'),
+  getDebugUserCreation: () => request('/admin/debug-user-creation'),
+  getBackupData: () => request('/admin/backup'),
+  restoreDb: (data: any) => request('/admin/restore', { method: 'POST', body: JSON.stringify(data) }),
+  getBackupConfigData: () => request('/admin/backup-config'),
+  restoreConfig: (data: any) => request('/admin/restore-config', { method: 'POST', body: JSON.stringify(data) })
 };

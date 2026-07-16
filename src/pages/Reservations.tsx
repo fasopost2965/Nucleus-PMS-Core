@@ -5,14 +5,18 @@
 
 import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { CalendarDays, Plus, Search, Filter, Trash2, CheckSquare, XCircle, Users, Bed, Coins, ArrowRight, X } from 'lucide-react';
+import { CalendarDays, Plus, Search, Filter, Trash2, CheckSquare, XCircle, Users, Bed, Coins, ArrowRight, X, UserPlus, ToggleLeft, Sparkles } from 'lucide-react';
 import { PageHeader, Badge, AlertBanner } from '../components/ui/pms-ui';
 import { mockReservations, mockGuests, mockRooms, mockBookingSources } from '../mockData';
 import { IReservation, TReservationStatus } from '../types';
 import { AnimatePresence, motion } from 'motion/react';
+import { useToast } from '../context/ToastContext';
+import { api } from '../utils/api';
 
 export default function Reservations() {
   const location = useLocation();
+  const toast = useToast();
+
   const [reservations, setReservations] = useState<IReservation[]>(() => {
     const stored = localStorage.getItem('pms_reservations');
     if (stored) {
@@ -20,6 +24,15 @@ export default function Reservations() {
     }
     return mockReservations;
   });
+  
+  const [guests, setGuests] = useState<any[]>(() => {
+    const stored = localStorage.getItem('pms_guests');
+    if (stored) {
+      try { return JSON.parse(stored); } catch (e) {}
+    }
+    return mockGuests;
+  });
+
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [successMsg, setSuccessMsg] = useState('');
@@ -27,7 +40,49 @@ export default function Reservations() {
   // Creation form states
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [step, setStep] = useState(1);
-  const [selectedGuestId, setSelectedGuestId] = useState('guest-1');
+  const [clientSource, setClientSource] = useState<'existing' | 'new'>('existing');
+  
+  // New Client info states
+  const [newFirstName, setNewFirstName] = useState('');
+  const [newLastName, setNewLastName] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [newNationality, setNewNationality] = useState('Ivoirienne');
+  const [newGender, setNewGender] = useState<'M' | 'F' | 'Autre'>('M');
+
+  const [selectedGuestId, setSelectedGuestId] = useState(() => {
+    const stored = localStorage.getItem('pms_guests');
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (parsed.length > 0) return parsed[0].id;
+      } catch (e) {}
+    }
+    return 'guest-1';
+  });
+
+  const [guestHistory, setGuestHistory] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+  useEffect(() => {
+    if (clientSource === 'existing' && selectedGuestId) {
+      setLoadingHistory(true);
+      api.getGuestHistory(selectedGuestId)
+        .then(history => {
+          setGuestHistory(history);
+        })
+        .catch(err => {
+          console.error("Error fetching guest history:", err);
+          setGuestHistory([]);
+        })
+        .finally(() => {
+          setLoadingHistory(false);
+        });
+    } else {
+      setGuestHistory([]);
+    }
+  }, [selectedGuestId, clientSource]);
+
   const [selectedRoomId, setSelectedRoomId] = useState('room-102');
   const [selectedSourceId, setSelectedSourceId] = useState('src-direct');
   const [arrivalDate, setArrivalDate] = useState('2026-07-15');
@@ -63,12 +118,101 @@ export default function Reservations() {
     }
   }, [location.state]);
 
+  const handleStep2Next = () => {
+    if (!arrivalDate || !departureDate) {
+      toast.showWarning("Veuillez sélectionner les dates d'arrivée et de départ.");
+      return;
+    }
+
+    const start = new Date(arrivalDate);
+    const end = new Date(departureDate);
+
+    if (start >= end) {
+      toast.showWarning("La date d'arrivée doit être strictement antérieure à la date de départ.");
+      return;
+    }
+
+    if (!selectedRoomId) {
+      toast.showWarning("Veuillez sélectionner une chambre valide.");
+      return;
+    }
+
+    const roomObj = mockRooms.find(r => r.id === selectedRoomId);
+    if (!roomObj) {
+      toast.showWarning("La chambre sélectionnée est introuvable.");
+      return;
+    }
+
+    setStep(3);
+  };
+
   const handleCreateReservation = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
+    if (!arrivalDate || !departureDate) {
+      toast.showWarning("Veuillez sélectionner les dates d'arrivée et de départ.");
+      return;
+    }
+
+    const start = new Date(arrivalDate);
+    const end = new Date(departureDate);
+
+    if (start >= end) {
+      toast.showWarning("La date d'arrivée doit être strictement antérieure à la date de départ.");
+      return;
+    }
+
+    if (!selectedRoomId) {
+      toast.showWarning("Veuillez sélectionner une chambre valide.");
+      return;
+    }
+
     const roomObj = mockRooms.find(r => r.id === selectedRoomId);
-    const guestObj = mockGuests.find(g => g.id === selectedGuestId);
-    if (!roomObj || !guestObj) return;
+    if (!roomObj) {
+      toast.showWarning("La chambre sélectionnée est introuvable ou invalide.");
+      return;
+    }
+    
+    let guestId = selectedGuestId;
+    let guestObj = guests.find(g => g.id === selectedGuestId);
+
+    if (clientSource === 'new') {
+      if (!newFirstName.trim() || !newLastName.trim()) {
+        toast.showWarning('Le prénom et le nom du nouveau client sont requis.');
+        return;
+      }
+
+      // Create new guest
+      const newGuest = {
+        id: `guest-${Date.now()}`,
+        first_name: newFirstName.trim(),
+        last_name: newLastName.trim(),
+        gender: newGender,
+        birth_date: '1990-01-01',
+        nationality: newNationality,
+        phone: newPhone.trim(),
+        email: newEmail.trim(),
+        address: '',
+        document_type: 'CNI',
+        document_number: '',
+        vip: false,
+        blacklist: false,
+        guest_type: 'Individuel'
+      };
+
+      // Add to guests state & localStorage
+      const updatedGuests = [...guests, newGuest];
+      setGuests(updatedGuests);
+      localStorage.setItem('pms_guests', JSON.stringify(updatedGuests));
+
+      guestId = newGuest.id;
+      guestObj = newGuest;
+    }
+
+    if (!roomObj || !guestObj) {
+      toast.showError('Informations de chambre ou de client invalides.');
+      return;
+    }
 
     const rate = roomObj.base_price;
     const subtotal = rate * nights;
@@ -79,7 +223,7 @@ export default function Reservations() {
     const newRes: IReservation = {
       id: `res-${Date.now()}`,
       reservation_number: `RES-2026-000${reservations.length + 1}`,
-      guest_id: selectedGuestId,
+      guest_id: guestId,
       room_id: selectedRoomId,
       booking_source_id: selectedSourceId,
       status: 'Confirmée',
@@ -102,16 +246,23 @@ export default function Reservations() {
     localStorage.setItem('pms_reservations', JSON.stringify(updatedList));
     setStep(1);
     setShowCreateModal(false);
-    setSuccessMsg(`La réservation ${newRes.reservation_number} a été créée avec succès.`);
-    setTimeout(() => setSuccessMsg(''), 4000);
+    toast.showSuccess(`La réservation ${newRes.reservation_number} a été créée avec succès pour ${guestObj.first_name} ${guestObj.last_name}.`);
+    
+    // Reset form & state
+    setNewFirstName('');
+    setNewLastName('');
+    setNewPhone('');
+    setNewEmail('');
+    setNewGender('M');
+    setNewNationality('Ivoirienne');
+    setClientSource('existing');
   };
 
   const updateReservationStatus = (id: string, newStatus: TReservationStatus) => {
     const updatedList = reservations.map(r => r.id === id ? { ...r, status: newStatus } : r);
     setReservations(updatedList);
     localStorage.setItem('pms_reservations', JSON.stringify(updatedList));
-    setSuccessMsg(`Statut de la réservation mis à jour : ${newStatus}`);
-    setTimeout(() => setSuccessMsg(''), 4000);
+    toast.showSuccess(`Statut de la réservation mis à jour : ${newStatus}`);
   };
 
   const deleteReservation = (id: string) => {
@@ -119,13 +270,22 @@ export default function Reservations() {
       const updatedList = reservations.filter(r => r.id !== id);
       setReservations(updatedList);
       localStorage.setItem('pms_reservations', JSON.stringify(updatedList));
-      setSuccessMsg('Réservation supprimée.');
-      setTimeout(() => setSuccessMsg(''), 4000);
+      toast.showSuccess('Réservation supprimée avec succès.');
     }
   };
 
   const selectedRoomObj = mockRooms.find(r => r.id === selectedRoomId);
-  const selectedGuestObj = mockGuests.find(g => g.id === selectedGuestId);
+  const selectedGuestObj = clientSource === 'existing'
+    ? guests.find(g => g.id === selectedGuestId)
+    : {
+        id: 'new-guest-temp',
+        first_name: newFirstName || 'Nouveau',
+        last_name: newLastName || 'Client',
+        email: newEmail || 'adresse@email.com',
+        phone: newPhone || 'Téléphone non renseigné',
+        nationality: newNationality,
+        vip: false
+      };
   const selectedSourceObj = mockBookingSources.find(s => s.id === selectedSourceId);
 
   return (
@@ -200,12 +360,12 @@ export default function Reservations() {
                 {reservations
                   .filter(r => statusFilter === 'all' || r.status === statusFilter)
                   .filter(r => {
-                    const guest = mockGuests.find(g => g.id === r.guest_id);
+                    const guest = guests.find(g => g.id === r.guest_id);
                     const guestName = guest ? `${guest.first_name} ${guest.last_name}` : '';
                     return r.reservation_number.includes(searchQuery) || guestName.toLowerCase().includes(searchQuery.toLowerCase());
                   })
                   .map((res) => {
-                    const guest = mockGuests.find(g => g.id === res.guest_id);
+                    const guest = guests.find(g => g.id === res.guest_id);
                     const room = mockRooms.find(rm => rm.id === res.room_id);
                     const source = mockBookingSources.find(s => s.id === res.booking_source_id);
                     
@@ -322,42 +482,181 @@ export default function Reservations() {
                         transition={{ duration: 0.18 }}
                         className="space-y-4"
                       >
+                        {/* Selector of Client Source */}
                         <div className="space-y-1.5">
-                          <label className="text-xs font-bold text-slate-700 flex items-center space-x-1">
-                            <Users size={13} className="text-brand-orange" />
-                            <span>Sélectionner le Client</span>
-                          </label>
-                          <select
-                            value={selectedGuestId}
-                            onChange={(e) => setSelectedGuestId(e.target.value)}
-                            className="w-full border border-slate-200 bg-slate-50/50 hover:bg-slate-50 focus:bg-white rounded-lg px-3 py-2 text-xs focus:border-brand-orange focus:ring-1 focus:ring-brand-orange/30 focus:outline-none transition-all cursor-pointer font-medium"
-                          >
-                            {mockGuests.map(g => (
-                              <option key={g.id} value={g.id}>{g.first_name} {g.last_name} ({g.nationality})</option>
-                            ))}
-                          </select>
+                          <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Source du Client / Réservation</label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setClientSource('existing')}
+                              className={`p-2.5 rounded-lg border text-center transition-all flex items-center justify-center space-x-2 cursor-pointer ${
+                                clientSource === 'existing'
+                                  ? 'border-brand-orange bg-brand-orange/5 text-brand-orange font-bold text-xs ring-2 ring-brand-orange/10'
+                                  : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-600 text-xs font-semibold'
+                              }`}
+                            >
+                              <Users size={14} />
+                              <span>Client Existant</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setClientSource('new')}
+                              className={`p-2.5 rounded-lg border text-center transition-all flex items-center justify-center space-x-2 cursor-pointer ${
+                                clientSource === 'new'
+                                  ? 'border-brand-orange bg-brand-orange/5 text-brand-orange font-bold text-xs ring-2 ring-brand-orange/10'
+                                  : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-600 text-xs font-semibold'
+                              }`}
+                            >
+                              <UserPlus size={14} />
+                              <span>Nouveau Client (Saisie à zéro)</span>
+                            </button>
+                          </div>
                         </div>
 
-                        {/* CLIENT DYNAMIC DETAILS CARD */}
-                        {selectedGuestObj && (
-                          <motion.div
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="p-3 bg-brand-orange/5 rounded-lg border border-brand-orange/10 flex items-center space-x-3 text-xs"
-                          >
-                            <div className="w-8 h-8 rounded-full bg-brand-orange/10 text-brand-orange flex items-center justify-center font-extrabold text-xs">
-                              {selectedGuestObj.first_name[0]}{selectedGuestObj.last_name[0]}
+                        {clientSource === 'existing' ? (
+                          <div className="space-y-4">
+                            <div className="space-y-1.5">
+                              <label className="text-xs font-bold text-slate-700 flex items-center space-x-1">
+                                <Users size={13} className="text-brand-orange" />
+                                <span>Sélectionner le Client</span>
+                              </label>
+                              <select
+                                value={selectedGuestId}
+                                onChange={(e) => setSelectedGuestId(e.target.value)}
+                                className="w-full border border-slate-200 bg-slate-50/50 hover:bg-slate-50 focus:bg-white rounded-lg px-3 py-2 text-xs focus:border-brand-orange focus:ring-1 focus:ring-brand-orange/30 focus:outline-none transition-all cursor-pointer font-medium"
+                              >
+                                {guests.map(g => (
+                                  <option key={g.id} value={g.id}>{g.first_name} {g.last_name} ({g.nationality})</option>
+                                ))}
+                              </select>
                             </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center justify-between">
-                                <span className="font-extrabold text-slate-800">{selectedGuestObj.first_name} {selectedGuestObj.last_name}</span>
-                                <span className="px-1.5 py-0.5 rounded bg-brand-orange/10 text-brand-orange font-extrabold text-[8px] uppercase tracking-wider">
-                                  {selectedGuestObj.id === 'guest-1' ? 'VIP' : 'Régulier'}
-                                </span>
+
+                            {/* CLIENT DYNAMIC DETAILS CARD */}
+                            {selectedGuestObj && (
+                              <motion.div
+                                initial={{ opacity: 0, y: 8 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="p-3 bg-brand-orange/5 rounded-lg border border-brand-orange/10 flex items-center space-x-3 text-xs"
+                              >
+                                <div className="w-8 h-8 rounded-full bg-brand-orange/10 text-brand-orange flex items-center justify-center font-extrabold text-xs">
+                                  {selectedGuestObj.first_name[0]}{selectedGuestObj.last_name[0]}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between">
+                                    <span className="font-extrabold text-slate-800">{selectedGuestObj.first_name} {selectedGuestObj.last_name}</span>
+                                    <span className="px-1.5 py-0.5 rounded bg-brand-orange/10 text-brand-orange font-extrabold text-[8px] uppercase tracking-wider">
+                                      {selectedGuestObj.id === 'guest-1' ? 'VIP' : 'Régulier'}
+                                    </span>
+                                  </div>
+                                  <p className="text-slate-500 text-[10px] truncate mt-0.5">{selectedGuestObj.email} • {selectedGuestObj.phone}</p>
+                                </div>
+                              </motion.div>
+                            )}
+
+                            {/* HABITUÉ ALERT BADGE */}
+                            {guestHistory.length > 0 && (
+                              <motion.div
+                                initial={{ opacity: 0, scale: 0.95 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                className="p-3 bg-amber-50 rounded-lg border border-amber-200 text-xs text-amber-800 space-y-1 mt-2"
+                              >
+                                <div className="flex items-center space-x-1.5 font-extrabold">
+                                  <Sparkles size={13} className="text-amber-600 animate-pulse" />
+                                  <span>Alerte : Client Habitué ✨</span>
+                                </div>
+                                <p className="text-[11px] text-amber-700 leading-relaxed font-semibold">
+                                  Ce client est un habitué ! Il a déjà effectué <strong className="font-extrabold text-amber-900">{guestHistory.length} séjour(s)</strong> chez nous. Assurez un accueil d'excellence.
+                                </p>
+                              </motion.div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="space-y-3.5 border border-slate-100 bg-slate-50/30 p-4 rounded-xl">
+                            <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center space-x-1.5 mb-1">
+                              <UserPlus size={14} className="text-brand-orange" />
+                              <span>Informations du Nouveau Client</span>
+                            </h4>
+                            
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-slate-600">Prénom <span className="text-rose-500">*</span></label>
+                                <input
+                                  type="text"
+                                  value={newFirstName}
+                                  onChange={(e) => setNewFirstName(e.target.value)}
+                                  placeholder="Prénom"
+                                  className="w-full border border-slate-200 bg-white rounded-lg px-2.5 py-1.5 text-xs focus:border-brand-orange focus:outline-none transition-all font-medium"
+                                  required
+                                />
                               </div>
-                              <p className="text-slate-500 text-[10px] truncate mt-0.5">{selectedGuestObj.email} • {selectedGuestObj.phone}</p>
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-slate-600">Nom de famille <span className="text-rose-500">*</span></label>
+                                <input
+                                  type="text"
+                                  value={newLastName}
+                                  onChange={(e) => setNewLastName(e.target.value)}
+                                  placeholder="Nom"
+                                  className="w-full border border-slate-200 bg-white rounded-lg px-2.5 py-1.5 text-xs focus:border-brand-orange focus:outline-none transition-all font-medium"
+                                  required
+                                />
+                              </div>
                             </div>
-                          </motion.div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-slate-600">Téléphone</label>
+                                <input
+                                  type="tel"
+                                  value={newPhone}
+                                  onChange={(e) => setNewPhone(e.target.value)}
+                                  placeholder="+225 07..."
+                                  className="w-full border border-slate-200 bg-white rounded-lg px-2.5 py-1.5 text-xs focus:border-brand-orange focus:outline-none transition-all font-medium"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-slate-600">E-mail</label>
+                                <input
+                                  type="email"
+                                  value={newEmail}
+                                  onChange={(e) => setNewEmail(e.target.value)}
+                                  placeholder="client@domaine.com"
+                                  className="w-full border border-slate-200 bg-white rounded-lg px-2.5 py-1.5 text-xs focus:border-brand-orange focus:outline-none transition-all font-medium"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-slate-600">Nationalité</label>
+                                <input
+                                  type="text"
+                                  value={newNationality}
+                                  onChange={(e) => setNewNationality(e.target.value)}
+                                  placeholder="Ivoirienne"
+                                  className="w-full border border-slate-200 bg-white rounded-lg px-2.5 py-1.5 text-xs focus:border-brand-orange focus:outline-none transition-all font-medium"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-slate-600">Genre</label>
+                                <div className="flex space-x-1">
+                                  {['M', 'F', 'Autre'].map((g) => (
+                                    <button
+                                      key={g}
+                                      type="button"
+                                      onClick={() => setNewGender(g as any)}
+                                      className={`flex-1 py-1.5 border rounded-lg text-xs font-semibold cursor-pointer transition-all ${
+                                        newGender === g
+                                          ? 'border-brand-orange bg-brand-orange/5 text-brand-orange font-bold'
+                                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                                      }`}
+                                    >
+                                      {g}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
                         )}
 
                         <div className="space-y-1.5">
@@ -502,7 +801,7 @@ export default function Reservations() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => setStep(3)}
+                            onClick={handleStep2Next}
                             className="bg-brand-orange hover:bg-brand-orange-hover text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors shadow-xs"
                           >
                             Étape suivante
