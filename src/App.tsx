@@ -3,16 +3,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate, Link } from 'react-router-dom';
 import { ShieldAlert, ArrowLeft } from 'lucide-react';
 import { hasPermission } from './utils/permissions';
+import { api } from './utils/api';
+import { ToastProvider } from './context/ToastContext';
 
 // Core layout
 import AppLayout from './components/layout/AppLayout';
 
 // Module pages
 import Login from './pages/Login';
+import ForcePasswordChange from './components/ForcePasswordChange';
 import Dashboard from './pages/Dashboard';
 import Reception from './pages/Reception';
 import Rooms from './pages/Rooms';
@@ -30,10 +33,48 @@ import HRMS from './pages/HRMS';
 
 import { useTimesheetLog } from './hooks/useTimesheetLog';
 
+// Declare custom window syncing flag
+declare global {
+  interface Window {
+    __pms_is_syncing?: boolean;
+  }
+}
+
+// Automatic Client-to-Server collection synchronization engine
+if (typeof window !== 'undefined') {
+  const originalSetItem = localStorage.setItem;
+  localStorage.setItem = function (key, value) {
+    originalSetItem.apply(this, arguments as any);
+    
+    // Only synchronize collections and if not currently doing a batch load/sync
+    if (!window.__pms_is_syncing && (key.startsWith('pms_') || key.startsWith('hrms_'))) {
+      const token = localStorage.getItem('pms_jwt_token');
+      if (token) {
+        try {
+          const parsedData = JSON.parse(value);
+          if (Array.isArray(parsedData)) {
+            fetch('/api/system/sync', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({ collectionName: key, data: parsedData })
+            }).catch(err => console.warn('[PMS Sync] Failed to sync collection to server:', key, err));
+          }
+        } catch (e) {
+          // Ignore non-JSON or non-array mutations
+        }
+      }
+    }
+  };
+}
+
 interface IUser {
   name: string;
   role: string;
   email: string;
+  mustChangePassword?: boolean;
 }
 
 export default function App() {
@@ -52,6 +93,49 @@ export default function App() {
     return null;
   });
 
+  // Start with true if there is a token to verify
+  const [isVerifying, setIsVerifying] = useState<boolean>(() => {
+    return !!localStorage.getItem('pms_jwt_token');
+  });
+
+  // Fetch system mode and all collections to synchronize local storage
+  const syncDatabaseWithServer = async () => {
+    const token = localStorage.getItem('pms_jwt_token');
+    if (!token) return;
+    
+    try {
+      window.__pms_is_syncing = true; // prevent automatic setItem override from looping
+      
+      const res = await fetch('/api/system/sync', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const data = await res.json();
+      if (data.success && data.collections) {
+        localStorage.setItem('appMode', data.appMode || 'demo');
+        if (data.appMode === 'production') {
+          localStorage.setItem('pms_db_purged', 'true');
+        } else {
+          localStorage.removeItem('pms_db_purged');
+        }
+        
+        // Write all synchronized collections to local storage
+        for (const [localKey, list] of Object.entries(data.collections)) {
+          localStorage.setItem(localKey, JSON.stringify(list));
+        }
+        
+        // Trigger events to refresh any active views
+        window.dispatchEvent(new Event('pms-data-synced'));
+        window.dispatchEvent(new Event('hotel-config-changed'));
+      }
+    } catch (err) {
+      console.error('Failed to sync database with server:', err);
+    } finally {
+      window.__pms_is_syncing = false;
+    }
+  };
+
   const handleLogin = (loggedUser: IUser) => {
     logLogin({
       name: loggedUser.name,
@@ -60,6 +144,8 @@ export default function App() {
     });
     setUser(loggedUser);
     localStorage.setItem('pms_user', JSON.stringify(loggedUser));
+    // Trigger synchronization immediately after login
+    syncDatabaseWithServer();
   };
 
   const handleLogout = () => {
@@ -72,11 +158,119 @@ export default function App() {
     }
     setUser(null);
     localStorage.removeItem('pms_user');
+    localStorage.removeItem('pms_jwt_token');
   };
+
+  useEffect(() => {
+    // 1. Fetch hotel settings so brand/logo updates propagate globally
+    const loadHotelSettings = async () => {
+      try {
+        const res = await fetch('/api/settings/hotel');
+        const data = await res.json();
+        if (data.success && data.settings) {
+          const s = data.settings;
+          localStorage.setItem('hotelName', s.hotel_name || 'Brunch Resto-Bar Vip');
+          if (s.logo) {
+            localStorage.setItem('hotelLogo', s.logo);
+          } else {
+            localStorage.removeItem('hotelLogo');
+          }
+          // Dispatch events so already-rendered components refresh immediately
+          window.dispatchEvent(new Event('hotel-config-changed'));
+        }
+      } catch (err) {
+        console.error('Failed to pre-fetch hotel settings:', err);
+      }
+    };
+
+    loadHotelSettings();
+
+    // 2. Verify current user against MySQL database
+    const verifyUserSession = async () => {
+      const token = localStorage.getItem('pms_jwt_token');
+      if (!token) {
+        setIsVerifying(false);
+        return;
+      }
+
+      try {
+        const res = await api.verifySession();
+        if (res && res.success && res.user) {
+          setUser(res.user);
+          localStorage.setItem('pms_user', JSON.stringify(res.user));
+          // Synchronize database state with the server immediately
+          await syncDatabaseWithServer();
+        } else {
+          handleLogout();
+        }
+      } catch (err: any) {
+        console.error('Session verification error:', err.message);
+        if (err.message && (
+          err.message.includes('401') || 
+          err.message.includes('inexistant') || 
+          err.message.includes('expired') || 
+          err.message.includes('invalid') || 
+          err.message.includes('session')
+        )) {
+          handleLogout();
+        }
+      } finally {
+        setIsVerifying(false);
+      }
+    };
+
+    verifyUserSession();
+  }, []);
+
+  if (isVerifying) {
+    const cachedLogo = localStorage.getItem('hotelLogo');
+    const cachedName = localStorage.getItem('hotelName') || 'Brunch Resto-Bar Vip';
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#0E0F11] text-white">
+        <div className="flex flex-col items-center space-y-4 text-center">
+          {cachedLogo ? (
+            <img src={cachedLogo} alt="Logo" className="h-16 w-16 object-contain rounded-xl mb-2" referrerPolicy="no-referrer" />
+          ) : (
+            <div className="h-14 w-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-500 font-extrabold text-xl mb-2">
+              B
+            </div>
+          )}
+          <h2 className="text-lg font-bold tracking-tight text-slate-200">{cachedName}</h2>
+          <div className="flex items-center space-x-2 text-slate-400 text-xs font-mono">
+            <svg className="animate-spin h-4 w-4 text-amber-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span>Vérification de la session en cours...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // If logged out, always redirect/render Login screen
   if (!user) {
-    return <Login onLoginSuccess={handleLogin} />;
+    return (
+      <ToastProvider>
+        <Login onLoginSuccess={handleLogin} />
+      </ToastProvider>
+    );
+  }
+
+  // If user is logged in but must change password on first connection
+  if (user && user.mustChangePassword) {
+    return (
+      <ToastProvider>
+        <ForcePasswordChange 
+          user={user} 
+          onLogout={handleLogout} 
+          onPasswordChanged={(updatedUser) => {
+            setUser(updatedUser);
+            localStorage.setItem('pms_user', JSON.stringify(updatedUser));
+          }} 
+        />
+      </ToastProvider>
+    );
   }
 
   // AccessDenied component for beautiful inline feedback when a module is restricted
@@ -106,30 +300,32 @@ export default function App() {
   };
 
   return (
-    <HashRouter>
-      <AppLayout user={user} onLogout={handleLogout}>
-        <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/reception" element={<ProtectedRoute path="/reception" element={<Reception />} />} />
-          <Route path="/rooms" element={<ProtectedRoute path="/rooms" element={<Rooms />} />} />
-          <Route path="/reservations" element={<ProtectedRoute path="/reservations" element={<Reservations />} />} />
-          <Route path="/guests" element={<ProtectedRoute path="/guests" element={<Guests />} />} />
-          <Route path="/finance" element={<ProtectedRoute path="/finance" element={<Finance />} />} />
-          <Route path="/housekeeping" element={<ProtectedRoute path="/housekeeping" element={<Housekeeping />} />} />
-          <Route path="/maintenance" element={<ProtectedRoute path="/maintenance" element={<Maintenance />} />} />
-          <Route path="/restaurant" element={<ProtectedRoute path="/restaurant" element={<Restaurant />} />} />
-          <Route path="/inventory" element={<ProtectedRoute path="/inventory" element={<Inventory />} />} />
-          <Route path="/reports" element={<ProtectedRoute path="/reports" element={<Reports />} />} />
-          <Route path="/settings" element={<ProtectedRoute path="/settings" element={<SettingsPage />} />} />
-          <Route path="/admin" element={<ProtectedRoute path="/admin" element={<Admin />} />} />
-          <Route path="/hrms" element={<ProtectedRoute path="/hrms" element={<HRMS />} />} />
-          
-          {/* Catch-all fallback redirecting to dashboard */}
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
-        </Routes>
-      </AppLayout>
-    </HashRouter>
+    <ToastProvider>
+      <HashRouter>
+        <AppLayout user={user} onLogout={handleLogout}>
+          <Routes>
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/reception" element={<ProtectedRoute path="/reception" element={<Reception />} />} />
+            <Route path="/rooms" element={<ProtectedRoute path="/rooms" element={<Rooms />} />} />
+            <Route path="/reservations" element={<ProtectedRoute path="/reservations" element={<Reservations />} />} />
+            <Route path="/guests" element={<ProtectedRoute path="/guests" element={<Guests />} />} />
+            <Route path="/finance" element={<ProtectedRoute path="/finance" element={<Finance />} />} />
+            <Route path="/housekeeping" element={<ProtectedRoute path="/housekeeping" element={<Housekeeping />} />} />
+            <Route path="/maintenance" element={<ProtectedRoute path="/maintenance" element={<Maintenance />} />} />
+            <Route path="/restaurant" element={<ProtectedRoute path="/restaurant" element={<Restaurant />} />} />
+            <Route path="/inventory" element={<ProtectedRoute path="/inventory" element={<Inventory />} />} />
+            <Route path="/reports" element={<ProtectedRoute path="/reports" element={<Reports />} />} />
+            <Route path="/settings" element={<ProtectedRoute path="/settings" element={<SettingsPage />} />} />
+            <Route path="/admin" element={<ProtectedRoute path="/admin" element={<Admin />} />} />
+            <Route path="/hrms" element={<ProtectedRoute path="/hrms" element={<HRMS />} />} />
+            
+            {/* Catch-all fallback redirecting to dashboard */}
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          </Routes>
+        </AppLayout>
+      </HashRouter>
+    </ToastProvider>
   );
 }
 

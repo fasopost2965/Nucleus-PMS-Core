@@ -32,9 +32,10 @@ import {
 } from 'lucide-react';
 import { StatCard, AlertBanner } from '../components/ui/pms-ui';
 import WelcomeNotification from '../components/WelcomeNotification';
-import { mockRooms, mockReservations, mockActivityLogs, mockGuests } from '../mockData';
+import { mockRooms, mockReservations, mockActivityLogs, mockGuests, mockRoomCategories } from '../mockData';
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { getRoomsList, getStock, logManualStockMovement } from '../stockService';
+import { api } from '../utils/api';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -42,6 +43,13 @@ export default function Dashboard() {
   const isPurged = localStorage.getItem('pms_db_purged') === 'true';
 
   const [rooms, setRooms] = useState(() => getRoomsList());
+  const [categories, setCategories] = useState<any[]>(() => {
+    const stored = localStorage.getItem('pms_room_categories');
+    if (stored) {
+      try { return JSON.parse(stored); } catch (e) {}
+    }
+    return mockRoomCategories;
+  });
   const [stock, setStock] = useState(() => getStock());
   const [reservations, setReservations] = useState(() => {
     const stored = localStorage.getItem('pms_reservations');
@@ -58,7 +66,40 @@ export default function Dashboard() {
     return isPurged ? [] : mockGuests;
   });
   const [activities, setActivities] = useState(() => isPurged ? [] : mockActivityLogs);
+  const [dbActivities, setDbActivities] = useState<any[]>([]);
+  const [loadingActivities, setLoadingActivities] = useState(true);
   const [successMsg, setSuccessMsg] = useState('');
+
+  const [apiReservations, setApiReservations] = useState<any[]>([]);
+  const [apiRooms, setApiRooms] = useState<any[]>([]);
+  const [loadingApiData, setLoadingApiData] = useState(true);
+
+  React.useEffect(() => {
+    let active = true;
+    const loadApiData = async () => {
+      try {
+        const [resList, roomsList, catsList] = await Promise.all([
+          api.getReservations(),
+          api.getRooms(),
+          api.getRoomCategories().catch(() => [])
+        ]);
+        if (active) {
+          setApiReservations(resList);
+          setApiRooms(roomsList);
+          if (catsList && catsList.length > 0) {
+            setCategories(catsList);
+            localStorage.setItem('pms_room_categories', JSON.stringify(catsList));
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching API data in Dashboard:", err);
+      } finally {
+        if (active) setLoadingApiData(false);
+      }
+    };
+    loadApiData();
+    return () => { active = false; };
+  }, []);
 
   // Currently logged-in user details for welcome banner
   const [currentUser] = useState(() => {
@@ -73,6 +114,30 @@ export default function Dashboard() {
 
   const [timesheetActive, setTimesheetActive] = useState(() => localStorage.getItem('pms_timesheet_active') === 'true');
   const [resumePauseReason, setResumePauseReason] = useState<string>('Break');
+
+  React.useEffect(() => {
+    let active = true;
+    const fetchLogs = async () => {
+      try {
+        const logs = await api.getActivityLogs();
+        if (active) {
+          setDbActivities(logs);
+          setLoadingActivities(false);
+        }
+      } catch (err) {
+        console.error('Error fetching activity logs:', err);
+        if (active) setLoadingActivities(false);
+      }
+    };
+    fetchLogs();
+    
+    // Auto-refresh every 10 seconds
+    const interval = setInterval(fetchLogs, 10000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   React.useEffect(() => {
     const handleSync = () => {
@@ -226,11 +291,31 @@ export default function Dashboard() {
   };
 
   // Calculate quick stats dynamically from state
-  const totalRooms = rooms.length;
-  const occupiedRooms = rooms.filter(r => r.current_status === 'Occupée').length;
-  const maintenanceRooms = rooms.filter(r => r.current_status === 'Maintenance').length;
-  const availableRooms = rooms.filter(r => r.current_status === 'Libre').length;
-  const occupancyRate = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
+  const activeReservations = apiReservations.length > 0 ? apiReservations : reservations;
+  const activeRooms = apiRooms.length > 0 ? apiRooms : rooms;
+
+  const totalRooms = activeRooms.length;
+  const occupiedRooms = activeRooms.filter((r: any) => r.current_status === 'Occupée' || r.current_status === 'Occupated').length;
+  const maintenanceRooms = activeRooms.filter((r: any) => r.current_status === 'Maintenance').length;
+  const availableRooms = activeRooms.filter((r: any) => r.current_status === 'Libre' || r.current_status === 'Disponible').length;
+
+  const todayStr = '2026-07-16';
+  // Today's occupancy rate based on reservations overlapping today
+  const todayReservations = activeReservations.filter((r: any) => {
+    return r.arrival_date <= todayStr && r.departure_date >= todayStr && r.status !== 'Annulée' && r.status !== 'No Show';
+  });
+  const activeOccupiedRoomsCount = todayReservations.length;
+  const activeTotalRoomsCount = totalRooms || 10;
+  const computedOccupancyRate = Math.min(100, Math.round((activeOccupiedRoomsCount / activeTotalRoomsCount) * 100));
+
+  const occupancyRate = computedOccupancyRate;
+
+  // New reservations created today or with arrival_date today
+  const newReservationsToday = activeReservations.filter((r: any) => {
+    const isArrivingToday = r.arrival_date === todayStr;
+    const isCreatedToday = r.created_at && r.created_at.startsWith(todayStr);
+    return (isArrivingToday || isCreatedToday) && r.status !== 'Annulée';
+  }).length;
   
   // Calculate pending laundry workload count (sum of dirty stock items)
   const pendingLaundryCount = stock
@@ -238,23 +323,32 @@ export default function Dashboard() {
     .reduce((acc, item) => acc + item.current_stock, 0);
 
   // Graphical Data
-  const occupancyData = isPurged ? [
-    { name: 'Lun', Standard: 0, Suite: 0, Deluxe: 0 },
-    { name: 'Mar', Standard: 0, Suite: 0, Deluxe: 0 },
-    { name: 'Mer', Standard: 0, Suite: 0, Deluxe: 0 },
-    { name: 'Jeu', Standard: 0, Suite: 0, Deluxe: 0 },
-    { name: 'Ven', Standard: 0, Suite: 0, Deluxe: 0 },
-    { name: 'Sam', Standard: 0, Suite: 0, Deluxe: 0 },
-    { name: 'Dim', Standard: 0, Suite: 0, Deluxe: 0 },
-  ] : [
-    { name: 'Lun', Standard: 65, Suite: 50, Deluxe: 70 },
-    { name: 'Mar', Standard: 70, Suite: 60, Deluxe: 80 },
-    { name: 'Mer', Standard: 80, Suite: 70, Deluxe: 90 },
-    { name: 'Jeu', Standard: 75, Suite: 80, Deluxe: 85 },
-    { name: 'Ven', Standard: 90, Suite: 90, Deluxe: 95 },
-    { name: 'Sam', Standard: 95, Suite: 100, Deluxe: 100 },
-    { name: 'Dim', Standard: 85, Suite: 80, Deluxe: 90 },
-  ];
+  const occupancyData = React.useMemo(() => {
+    const days = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+    const firstCatName = categories[0]?.name || 'Standard';
+    const secondCatName = categories[1]?.name || 'Deluxe';
+    const thirdCatName = categories[2]?.name || 'Suite';
+
+    const baseValues = [
+      { first: 65, second: 70, third: 50 },
+      { first: 70, second: 80, third: 60 },
+      { first: 80, second: 90, third: 70 },
+      { first: 75, second: 85, third: 80 },
+      { first: 90, second: 95, third: 90 },
+      { first: 95, second: 100, third: 100 },
+      { first: 85, second: 90, third: 80 }
+    ];
+
+    return days.map((day, idx) => {
+      const val = isPurged ? { first: 0, second: 0, third: 0 } : baseValues[idx];
+      return {
+        name: day,
+        [firstCatName]: val.first,
+        [secondCatName]: val.second,
+        [thirdCatName]: val.third
+      };
+    });
+  }, [categories, isPurged]);
 
   const revenueData = isPurged ? [
     { name: '07/07', Chambres: 0, Restaurant: 0, Total: 0 },
@@ -480,6 +574,86 @@ export default function Dashboard() {
         />
       </div>
 
+      {/* RÉSUMÉ VISUEL DES RÉSERVATIONS DU JOUR */}
+      <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-md relative overflow-hidden text-left transition-all hover:shadow-lg">
+        {/* Decorative subtle ambient soft gradient */}
+        <div className="absolute -right-16 -top-16 w-48 h-48 rounded-full bg-brand-orange/5 blur-3xl pointer-events-none"></div>
+        <div className="absolute -left-16 -bottom-16 w-48 h-48 rounded-full bg-slate-100 blur-3xl pointer-events-none"></div>
+
+        <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+          {/* Left Column: Summary Text */}
+          <div className="space-y-3.5 max-w-xl">
+            <div className="flex items-center space-x-2">
+              <span className="p-1.5 bg-brand-orange/10 text-brand-orange rounded-lg border border-brand-orange/20 flex items-center justify-center">
+                <Calendar size={14} />
+              </span>
+              <span className="text-[10px] uppercase font-black tracking-widest text-brand-orange">Synthèse opérationnelle</span>
+            </div>
+            
+            <h2 className="text-lg font-extrabold tracking-tight text-slate-900">Réservations du Jour & Taux d'Occupation</h2>
+            <p className="text-xs text-slate-600 leading-relaxed font-medium">
+              Aujourd'hui, l'activité hôtelière enregistre <strong className="text-brand-orange font-extrabold">{newReservationsToday} nouvelle(s) réservation(s)</strong> actives ou créées ce jour. Le taux d'occupation de votre parc hôtelier est actuellement de <strong className="text-emerald-600 font-extrabold">{computedOccupancyRate}%</strong>.
+            </p>
+
+            <div className="flex flex-wrap gap-2 pt-1">
+              <span className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-bold text-slate-600 flex items-center space-x-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-brand-orange animate-pulse"></span>
+                <span>{newReservationsToday} Nouvelle(s)</span>
+              </span>
+              <span className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-bold text-slate-600 flex items-center space-x-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                <span>{todayReservations.length} En séjour</span>
+              </span>
+              <span className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-bold text-slate-600 flex items-center space-x-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                <span>{activeRooms.length} Chambres au total</span>
+              </span>
+            </div>
+          </div>
+
+          {/* Right Column: Visual Progress and Indicators */}
+          <div className="flex flex-col sm:flex-row items-center gap-6 shrink-0 lg:border-l lg:border-slate-200 lg:pl-8">
+            {/* Visual Indicator 1: New Reservations */}
+            <div className="flex flex-col items-center text-center space-y-1 p-4 bg-slate-50/80 rounded-xl border border-slate-200/60 min-w-[140px] w-full sm:w-auto">
+              <span className="text-[9px] uppercase font-black tracking-wider text-slate-500">Nouvelles Rés.</span>
+              <div className="text-3xl font-black text-brand-orange">{newReservationsToday}</div>
+              <span className="text-[9px] text-slate-500 font-bold">Créées / Arrivées ce jour</span>
+            </div>
+
+            {/* Visual Indicator 2: Occupancy Rate Radial / Ring */}
+            <div className="flex items-center space-x-4 p-4 bg-slate-50/80 rounded-xl border border-slate-200/60 min-w-[190px] w-full sm:w-auto justify-center sm:justify-start">
+              <div className="relative w-12 h-12 shrink-0 flex items-center justify-center">
+                {/* SVG Progress Circle */}
+                <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                  <path
+                    className="text-slate-200"
+                    strokeWidth="3.5"
+                    stroke="currentColor"
+                    fill="none"
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                  />
+                  <path
+                    className="text-emerald-500"
+                    strokeWidth="3.5"
+                    strokeDasharray={`${computedOccupancyRate}, 100`}
+                    strokeLinecap="round"
+                    stroke="currentColor"
+                    fill="none"
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                  />
+                </svg>
+                <div className="absolute text-[11px] font-black text-slate-800">{computedOccupancyRate}%</div>
+              </div>
+              <div className="text-left space-y-0.5">
+                <span className="text-[9px] uppercase font-black tracking-wider text-slate-500 block">Taux d'occ.</span>
+                <div className="text-base font-black text-slate-800">{todayReservations.length} / {activeRooms.length}</div>
+                <span className="text-[9px] text-slate-500 font-bold block">Chambres occupées</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* COMPACT LOGISTICS / BLANCHISSERIE ALERT STRIP */}
       {pendingLaundryCount > 0 && (
         <div className="bg-amber-50/70 border border-amber-200/60 rounded-xl p-3.5 flex flex-col sm:flex-row justify-between items-center text-xs gap-3 text-left">
@@ -691,8 +865,8 @@ export default function Dashboard() {
                 <XAxis dataKey="name" stroke="#94A3B8" fontSize={11} tickLine={false} />
                 <YAxis stroke="#94A3B8" fontSize={11} tickLine={false} />
                 <Tooltip />
-                <Area type="monotone" dataKey="Deluxe" stroke="#D45D1A" fillOpacity={1} fill="url(#colorDlx)" />
-                <Area type="monotone" dataKey="Suite" stroke="#4F46E5" fillOpacity={1} fill="url(#colorSuite)" />
+                <Area type="monotone" dataKey={categories[1]?.name || 'Deluxe'} stroke="#D45D1A" fillOpacity={1} fill="url(#colorDlx)" />
+                <Area type="monotone" dataKey={categories[2]?.name || 'Suite'} stroke="#4F46E5" fillOpacity={1} fill="url(#colorSuite)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -705,29 +879,71 @@ export default function Dashboard() {
               <Clock className="text-slate-600" size={16} />
               <span>Activité récente (Audit)</span>
             </h3>
-            <p className="text-[10px] text-slate-400">Flux d'actions en direct enregistrées aujourd'hui</p>
+            <p className="text-[10px] text-slate-400">Flux d'actions en direct enregistrées aujourd'hui (Temps réel)</p>
           </div>
           
-          <div className="space-y-4 flex-1 overflow-y-auto max-h-56">
-            {activities.map((log) => (
-              <div key={log.id} className="relative flex space-x-3 text-xs">
-                <div className="flex flex-col items-center">
-                  <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
-                    log.type === 'success' ? 'bg-emerald-500' : log.type === 'error' ? 'bg-rose-500' : log.type === 'warning' ? 'bg-amber-500' : 'bg-slate-400'
-                  }`}></div>
-                  <div className="w-px h-full bg-slate-200 mt-1"></div>
-                </div>
-                <div className="pb-1">
-                  <div className="flex items-center space-x-2">
-                    <span className="font-bold text-slate-800">{log.time}</span>
-                    <span className="text-slate-400">•</span>
-                    <span className="text-[10px] text-slate-500 bg-slate-100 px-1 py-0.5 rounded font-medium">{log.module}</span>
-                  </div>
-                  <p className="text-slate-600 mt-0.5 font-medium">{log.details}</p>
-                  <p className="text-[9px] text-slate-400 mt-0.5">Par : {log.user}</p>
-                </div>
+          <div className="space-y-4 flex-1 overflow-y-auto max-h-56 pr-1">
+            {loadingActivities ? (
+              <div className="flex flex-col items-center justify-center py-10 text-slate-400">
+                <RefreshCw size={20} className="animate-spin text-slate-400 mb-2" />
+                <span className="text-[10px] font-bold">Chargement des activités...</span>
               </div>
-            ))}
+            ) : dbActivities.length === 0 ? (
+              <div className="text-center py-10 text-slate-400 font-bold text-xs">
+                Aucune activité enregistrée.
+              </div>
+            ) : (
+              dbActivities.slice(0, 15).map((log: any) => {
+                let bulletColor = 'bg-slate-400';
+                if (log.action && (log.action.includes('check_in') || log.action.includes('create') || log.action.includes('success') || log.action.includes('payment_received') || log.action.includes('login'))) {
+                  bulletColor = 'bg-emerald-500';
+                } else if (log.action && (log.action.includes('error') || log.action.includes('fail') || log.action.includes('suspend') || log.action.includes('purge'))) {
+                  bulletColor = 'bg-rose-500';
+                } else if (log.action && (log.action.includes('update') || log.action.includes('warning') || log.action.includes('extend'))) {
+                  bulletColor = 'bg-amber-500';
+                } else if (log.module === 'settings' || log.module === 'auth') {
+                  bulletColor = 'bg-indigo-500';
+                }
+
+                // Friendly date string
+                const timeStr = new Date(log.created_at).toLocaleTimeString('fr-FR', {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                });
+                const dateStr = new Date(log.created_at).toLocaleDateString('fr-FR', {
+                  day: 'numeric',
+                  month: 'short'
+                });
+
+                const userStr = log.user 
+                  ? `${log.user.first_name} ${log.user.last_name} (${log.user.role})`
+                  : 'Système';
+
+                return (
+                  <div key={log.id} className="relative flex space-x-3 text-xs">
+                    <div className="flex flex-col items-center">
+                      <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${bulletColor}`}></div>
+                      <div className="w-px h-full bg-slate-200 mt-1"></div>
+                    </div>
+                    <div className="pb-1.5 flex-1">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <span className="font-bold text-slate-800">{timeStr}</span>
+                          <span className="text-slate-400 text-[10px]">{dateStr}</span>
+                          <span className="text-slate-400">•</span>
+                          <span className="text-[9px] uppercase font-bold text-slate-500 bg-slate-100 px-1 py-0.5 rounded">{log.module}</span>
+                        </div>
+                        {log.ip_address && (
+                          <span className="text-[8px] font-mono text-slate-400">{log.ip_address}</span>
+                        )}
+                      </div>
+                      <p className="text-slate-600 mt-0.5 font-medium leading-relaxed">{log.details}</p>
+                      <p className="text-[9px] text-slate-400 mt-0.5">Par : {userStr}</p>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
 

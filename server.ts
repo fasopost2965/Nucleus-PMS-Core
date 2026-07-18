@@ -6,6 +6,7 @@ import rateLimit from 'express-rate-limit';
 import { createServer as createViteServer } from 'vite';
 import apiRouter from './server/routes/api';
 import { errorHandler } from './server/middlewares/errorHandler';
+import { startBackupScheduler } from './server/config/scheduler';
 
 async function startServer() {
   const app = express();
@@ -63,10 +64,31 @@ async function startServer() {
   } else {
     console.log('[Server] Running in PRODUCTION mode. Serving static assets.');
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    
+    // Serve static files with proper cache-busting and caching strategies
+    app.use(express.static(distPath, {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html')) {
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+        } else {
+          // Dynamic logos or non-hashed public resources should be validated but can be cached temporarily
+          if (filePath.includes('/logo') || filePath.endsWith('.png') || filePath.endsWith('.jpg') || filePath.endsWith('.svg')) {
+            res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+          } else {
+            // Version-hashed compiled assets can be safely cached immutably
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          }
+        }
+      }
+    }));
     
     // Catch-all to support React Router single page navigation
     app.get('*', (req, res) => {
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.set('Pragma', 'no-cache');
+      res.set('Expires', '0');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
@@ -76,6 +98,8 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Server] Success! Nucleus PMS Core running on http://0.0.0.0:${PORT}`);
+    // Start automated 24h backup scheduler
+    startBackupScheduler();
   });
 }
 

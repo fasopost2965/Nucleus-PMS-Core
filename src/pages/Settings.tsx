@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { api } from '../utils/api';
 import { 
   Settings, 
   Save, 
@@ -67,7 +68,53 @@ interface Employee {
 export default function SettingsPage() {
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
-  const [activeTab, setActiveTab] = useState<'identity' | 'rooms' | 'services' | 'finance' | 'staff' | 'system'>('identity');
+  const [activeTab, setActiveTab] = useState<'identity' | 'rooms' | 'services' | 'finance' | 'staff' | 'system' | 'security'>('identity');
+
+  // Password modification states
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [pwdLoading, setPwdLoading] = useState(false);
+  const [pwdSuccess, setPwdSuccess] = useState('');
+  const [pwdError, setPwdError] = useState('');
+
+  const handlePasswordChangeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwdError('');
+    setPwdSuccess('');
+    
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setPwdError('Tous les champs sont obligatoires.');
+      return;
+    }
+    
+    if (newPassword !== confirmPassword) {
+      setPwdError('Le nouveau mot de passe et sa confirmation ne correspondent pas.');
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setPwdError('Le nouveau mot de passe doit contenir au moins 6 caractères.');
+      return;
+    }
+
+    setPwdLoading(true);
+    try {
+      const res = await api.changePassword({ currentPassword, newPassword });
+      if (res && res.success) {
+        setPwdSuccess('Votre mot de passe a été modifié avec succès !');
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+      } else {
+        setPwdError(res.error?.message || 'Une erreur est survenue.');
+      }
+    } catch (err: any) {
+      setPwdError(err.message || 'Le mot de passe actuel est incorrect.');
+    } finally {
+      setPwdLoading(false);
+    }
+  };
   
   // 1. HOTEL IDENTITY STATES
   const [hotelName, setHotelName] = useState(() => localStorage.getItem('hotelName') || 'Brunch Resto-Bar Vip');
@@ -181,8 +228,50 @@ export default function SettingsPage() {
     window.dispatchEvent(new Event('hotel-config-changed'));
   };
 
+  useEffect(() => {
+    const fetchSettingsFromDB = async () => {
+      try {
+        const token = localStorage.getItem('pms_jwt_token');
+        if (!token) return;
+        
+        // Fetch hotel settings and room categories in parallel
+        const [resSettings, cats] = await Promise.all([
+          fetch('/api/settings/hotel', {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          }).then(r => r.json()),
+          api.getRoomCategories().catch(e => {
+            console.warn('Fallback loading categories:', e);
+            return [];
+          })
+        ]);
+
+        if (resSettings.success && resSettings.settings) {
+          const s = resSettings.settings;
+          if (s.hotel_name || s.hotelName) setHotelName(s.hotel_name || s.hotelName);
+          if (s.legal_name || s.legalName) setLegalName(s.legal_name || s.legalName);
+          if (s.phone || s.hotelPhone) setPhone(s.phone || s.hotelPhone);
+          if (s.email || s.hotelEmail) setEmail(s.email || s.hotelEmail);
+          if (s.website || s.hotelWebsite) setWebsite(s.website || s.hotelWebsite);
+          if (s.address || s.hotelAddress) setAddress(s.address || s.hotelAddress);
+          if (s.logo !== undefined) setLogo(s.logo);
+        }
+
+        if (cats && cats.length > 0) {
+          setCategories(cats);
+          localStorage.setItem('pms_room_categories', JSON.stringify(cats));
+        }
+      } catch (err) {
+        console.error('Failed to fetch settings from DB:', err);
+      }
+    };
+
+    fetchSettingsFromDB();
+  }, []);
+
   // MAIN SAVE HANDLER
-  const handleSaveAllSettings = (e: React.FormEvent) => {
+  const handleSaveAllSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       // 1. Hotel Identity & Policy Storage
@@ -245,12 +334,36 @@ export default function SettingsPage() {
         localStorage.removeItem('hotelLogo');
       }
 
+      // 7. Save to server database as well
+      const token = localStorage.getItem('pms_jwt_token');
+      if (token) {
+        await Promise.all([
+          fetch('/api/settings/hotel', {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              hotel_name: hotelName,
+              legal_name: legalName,
+              phone,
+              email,
+              website,
+              address,
+              logo
+            })
+          }),
+          api.updateRoomCategories(categories)
+        ]);
+      }
+
       triggerConfigRefresh();
       setSuccessMsg('Toutes les configurations hôtelières et applicatives ont été enregistrées avec succès.');
       window.scrollTo({ top: 0, behavior: 'smooth' });
       setTimeout(() => setSuccessMsg(''), 5000);
     } catch (err) {
-      setErrorMsg('Erreur lors de l\'enregistrement des paramètres locaux.');
+      setErrorMsg('Erreur lors de l\'enregistrement des paramètres locaux et de la base de données.');
       setTimeout(() => setErrorMsg(''), 5000);
     }
   };
@@ -310,8 +423,8 @@ export default function SettingsPage() {
   };
 
   // EMPLOYEES LOGIC
-  const handleAddEmployee = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddEmployee = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!newEmployee.first_name || !newEmployee.last_name) return;
 
     const added: Employee = {
@@ -440,13 +553,19 @@ export default function SettingsPage() {
   const handleResetToDemoData = async () => {
     if (confirm('⚠️ Attention : Cette action va écraser TOUTES vos données actuelles (chambres, réservations, factures, stocks) et restaurer le jeu de données de démonstration de Brunch Resto-Bar VIP Bouaké. Continuer ?')) {
       try {
-        const token = localStorage.getItem('pms_jwt_token');
-        if (token) {
+        window.__pms_is_syncing = true; // Block automatic individual sync requests during bulk write
+        
+        // Keep active session keys
+        const pmsUser = localStorage.getItem('pms_user');
+        const pmsToken = localStorage.getItem('pms_jwt_token');
+        const hotelLogo = localStorage.getItem('hotelLogo');
+
+        if (pmsToken) {
           await fetch('/api/system/seed', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
+              'Authorization': `Bearer ${pmsToken}`
             }
           });
         }
@@ -454,6 +573,11 @@ export default function SettingsPage() {
         localStorage.clear();
         localStorage.removeItem('pms_db_purged');
         
+        // Restore active session keys
+        if (pmsUser) localStorage.setItem('pms_user', pmsUser);
+        if (pmsToken) localStorage.setItem('pms_jwt_token', pmsToken);
+        if (hotelLogo) localStorage.setItem('hotelLogo', hotelLogo);
+
         // Repopulate standard config
         localStorage.setItem('hotelName', 'Brunch Resto-Bar Vip');
         localStorage.setItem('legalName', 'Brunch Resto-Bar Vip SARL');
@@ -465,7 +589,7 @@ export default function SettingsPage() {
         localStorage.setItem('tvaRate', '18');
         localStorage.setItem('touristTaxEnabled', 'true');
         localStorage.setItem('touristTaxAmt', '1000');
-        localStorage.setItem('appMode', 'production');
+        localStorage.setItem('appMode', 'demo'); // FIX: Set appMode to demo instead of production
         localStorage.setItem('backupEnabled', 'true');
         localStorage.setItem('defaultCurrency', 'XOF');
         localStorage.setItem('hotelLogo', 'PRESET_VIP_LOGO');
@@ -483,17 +607,21 @@ export default function SettingsPage() {
         setSuccessMsg('Le système a été réinitialisé avec succès avec les données de démonstration d\'origine ! Rechargement en cours...');
         triggerConfigRefresh();
         setTimeout(() => {
+          window.__pms_is_syncing = false;
           window.location.reload();
         }, 1500);
       } catch (err) {
+        window.__pms_is_syncing = false;
         setErrorMsg('Erreur lors de la réinitialisation de la démo.');
       }
     }
   };
 
   const handleClearAllDatabase = async () => {
-    if (confirm('❌ DANGER : Cette action va effacer l\'intégralité des données locales de l\'application (Aucune sauvegarde locale). L\'application sera vierge et prête pour accueillir vos vraies données de Brunch Bouaké. Êtes-vous absolument sûr ?')) {
+    if (confirm(`❌ DANGER : Cette action va effacer l'intégralité des données locales de l'application (Aucune sauvegarde locale). L'application sera vierge et prête pour accueillir vos vraies données de Brunch Bouaké. Êtes-vous absolument sûr ?`)) {
       try {
+        window.__pms_is_syncing = true; // Block automatic individual sync requests during bulk write
+        
         // Keep active session keys
         const pmsUser = localStorage.getItem('pms_user');
         const pmsToken = localStorage.getItem('pms_jwt_token');
@@ -518,6 +646,7 @@ export default function SettingsPage() {
 
         // Set the purged flag so that empty state is prioritized and mock fallbacks are bypassed
         localStorage.setItem('pms_db_purged', 'true');
+        localStorage.setItem('appMode', 'production'); // Set appMode to production on database clear
 
         // Seed empty structure placeholders to prevent fallback to demo data
         localStorage.setItem('hotelName', 'Brunch Bouaké');
@@ -549,12 +678,14 @@ export default function SettingsPage() {
         localStorage.setItem('hrms_business_events', JSON.stringify([]));
         localStorage.setItem('hrms_payroll_rules', JSON.stringify([]));
         
-        setSuccessMsg('Base de données vidée ! L\'application est désormais vierge et prête pour vos données réelles. Rechargement du PMS...');
+        setSuccessMsg(`Base de données vidée ! L'application est désormais vierge et prête pour vos données réelles. Rechargement du PMS...`);
         triggerConfigRefresh();
         setTimeout(() => {
+          window.__pms_is_syncing = false;
           window.location.reload();
         }, 1500);
       } catch (err) {
+        window.__pms_is_syncing = false;
         setErrorMsg('Erreur lors du nettoyage de la base de données.');
       }
     }
@@ -663,6 +794,19 @@ export default function SettingsPage() {
                 >
                   <RefreshCw size={14} />
                   <span>6. Système & Maintenance</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('security')}
+                  className={`w-full py-2.5 px-3 rounded-lg text-xs font-bold flex items-center space-x-2.5 transition-all cursor-pointer ${
+                    activeTab === 'security' 
+                      ? 'bg-brand-orange text-white shadow-sm font-extrabold' 
+                      : 'hover:bg-slate-800 hover:text-white'
+                  }`}
+                >
+                  <Shield size={14} />
+                  <span>7. Sécurité & Compte</span>
                 </button>
               </nav>
             </div>
@@ -1513,7 +1657,7 @@ export default function SettingsPage() {
                           </button>
                         </div>
 
-                        <form onSubmit={handleAddEmployee} className="p-5 space-y-3.5 text-xs font-semibold">
+                        <div className="p-5 space-y-3.5 text-xs font-semibold">
                           <div className="grid grid-cols-2 gap-3">
                             <div className="space-y-1">
                               <label className="text-slate-700">Prénom <span className="text-red-500">*</span></label>
@@ -1585,13 +1729,14 @@ export default function SettingsPage() {
                               Annuler
                             </button>
                             <button
-                              type="submit"
-                              className="px-5 py-2 bg-brand-orange text-white rounded-lg hover:bg-brand-orange-hover cursor-pointer"
+                              type="button"
+                              onClick={() => handleAddEmployee()}
+                              className="px-5 py-2 bg-brand-orange text-white rounded-lg hover:bg-brand-orange-hover cursor-pointer font-bold"
                             >
                               Enregistrer l'accès
                             </button>
                           </div>
-                        </form>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -1753,22 +1898,92 @@ export default function SettingsPage() {
                 </div>
               )}
 
+              {/* TAB 7: SECURITY & PASSWORD CHANGE */}
+              {activeTab === 'security' && (
+                <div className="space-y-6">
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-900">Modification du Mot de passe</h3>
+                    <p className="text-[11px] text-slate-500 font-medium">Pour assurer la sécurité de votre compte, changez régulièrement de mot de passe.</p>
+                  </div>
+
+                  <div className="max-w-md bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+                    {pwdSuccess && (
+                      <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 text-xs rounded-lg font-medium">
+                        {pwdSuccess}
+                      </div>
+                    )}
+                    {pwdError && (
+                      <div className="p-3 bg-red-50 border border-red-100 text-red-800 text-xs rounded-lg font-medium">
+                        {pwdError}
+                      </div>
+                    )}
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-700 block">Mot de passe actuel</label>
+                      <input
+                        type="password"
+                        required
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs focus:border-brand-orange focus:ring-1 focus:ring-brand-orange focus:outline-none font-medium"
+                        placeholder="••••••••"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-700 block">Nouveau mot de passe</label>
+                      <input
+                        type="password"
+                        required
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs focus:border-brand-orange focus:ring-1 focus:ring-brand-orange focus:outline-none font-medium"
+                        placeholder="Minimum 6 caractères"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-700 block">Confirmer le nouveau mot de passe</label>
+                      <input
+                        type="password"
+                        required
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs focus:border-brand-orange focus:ring-1 focus:ring-brand-orange focus:outline-none font-medium"
+                        placeholder="••••••••"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={pwdLoading}
+                      onClick={handlePasswordChangeSubmit}
+                      className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold py-2.5 px-5 rounded-lg transition-colors flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <span>{pwdLoading ? "Enregistrement..." : "Mettre à jour le mot de passe"}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
             </div>
 
             {/* SAVE ALL PREFERENCES SUBMIT FOOTER */}
-            <div className="pt-6 border-t border-slate-100 mt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div className="flex items-center space-x-1.5 text-[10px] text-slate-500 font-semibold self-start sm:self-auto">
-                <ShieldCheck size={12} className="text-emerald-600" />
-                <span>Tous les réglages sont sauvegardés localement (localStorage).</span>
+            {activeTab !== 'security' && (
+              <div className="pt-6 border-t border-slate-100 mt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center space-x-1.5 text-[10px] text-slate-500 font-semibold self-start sm:self-auto">
+                  <ShieldCheck size={12} className="text-emerald-600" />
+                  <span>Tous les réglages sont sauvegardés localement (localStorage).</span>
+                </div>
+                <button
+                  type="submit"
+                  className="bg-brand-orange hover:bg-brand-orange-hover text-white text-xs font-bold py-2.5 px-6 rounded-lg transition-colors flex items-center space-x-1.5 cursor-pointer shadow-md shadow-brand-orange/15 w-full sm:w-auto justify-center"
+                >
+                  <Save size={14} />
+                  <span>Enregistrer les Paramètres</span>
+                </button>
               </div>
-              <button
-                type="submit"
-                className="bg-brand-orange hover:bg-brand-orange-hover text-white text-xs font-bold py-2.5 px-6 rounded-lg transition-colors flex items-center space-x-1.5 cursor-pointer shadow-md shadow-brand-orange/15 w-full sm:w-auto justify-center"
-              >
-                <Save size={14} />
-                <span>Enregistrer les Paramètres</span>
-              </button>
-            </div>
+            )}
 
           </form>
 
