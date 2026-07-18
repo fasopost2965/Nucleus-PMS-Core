@@ -128,8 +128,14 @@ router.post('/auth/forgot-password', async (req, res, next) => {
     }
     const users = await db.getCollection('users');
     const user = users.find((u: any) => u.email.toLowerCase() === email.toLowerCase().trim());
+
+    // Always return the same generic response whether or not the account
+    // exists — returning 404 only for unknown emails turns this endpoint
+    // into an account-enumeration oracle.
+    const genericMessage = 'Si un compte existe pour cette adresse email, un code de réinitialisation a été généré.';
+
     if (!user) {
-      return res.status(404).json({ success: false, error: { message: 'Aucun compte associé à cette adresse email.' } });
+      return res.status(200).json({ success: true, message: genericMessage });
     }
 
     // Generate a 6-digit numeric reset code
@@ -145,7 +151,7 @@ router.post('/auth/forgot-password', async (req, res, next) => {
     // In production it must be delivered out-of-band (email/SMS) — never in the API response.
     return res.status(200).json({
       success: true,
-      message: 'Un code de réinitialisation vous a été généré.',
+      message: genericMessage,
       ...(process.env.NODE_ENV !== 'production' ? { devCode: resetCode } : {})
     });
   } catch (err) {
