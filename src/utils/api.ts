@@ -136,6 +136,18 @@ export const api = {
   checkInReservation: (id: string) => request(`/reservations/${id}/check-in`, { method: 'POST' }),
   checkOutReservation: (id: string) => request(`/reservations/${id}/check-out`, { method: 'POST' }),
 
+  // Finance API
+  getInvoices: async (): Promise<any[]> => {
+    const res = await request('/finance/invoices');
+    return res.invoices || [];
+  },
+  getPayments: async (): Promise<any[]> => {
+    const res = await request('/finance/payments');
+    return res.payments || [];
+  },
+  payInvoice: (invoiceId: string, data: { payment_method: string; amount?: number; reference?: string }) =>
+    request(`/finance/invoices/${invoiceId}/pay`, { method: 'POST', body: JSON.stringify(data) }),
+
   // HRMS API
   getEmployees: async (): Promise<any[]> => {
     const res = await request('/hrms/employees');

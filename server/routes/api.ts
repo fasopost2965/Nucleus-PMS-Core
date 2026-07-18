@@ -1250,6 +1250,71 @@ router.post('/finance/payments', requireRole(...RECEPTION_ROLES), async (req: Au
   }
 });
 
+router.get('/finance/payments', async (req, res, next) => {
+  try {
+    const payments = await db.getCollection('payments');
+    return res.status(200).json({ success: true, payments });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Registers a payment against a specific invoice: the payment record and the
+// invoice's paid/balance/status must land together as a single atomic write
+// (the generic POST /finance/payments above never updated the invoice at
+// all, so an invoice's balance could silently drift from its actual
+// payments).
+router.post('/finance/invoices/:id/pay', requireRole(...RECEPTION_ROLES), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    const { payment_method, amount, reference } = req.body;
+    if (!payment_method) {
+      return res.status(400).json({ success: false, error: { message: 'Le moyen de paiement est requis.' } });
+    }
+
+    const invoice = await db.getById('invoices', id);
+    if (!invoice) {
+      return res.status(404).json({ success: false, error: { message: 'Facture introuvable.' } });
+    }
+    if (invoice.balance <= 0) {
+      return res.status(400).json({ success: false, error: { message: 'Cette facture est déjà entièrement réglée.', code: 'INVOICE_ALREADY_PAID' } });
+    }
+
+    // The amount collected is capped to the actual remaining balance —
+    // never trust a client-supplied amount that overshoots what's owed.
+    const requestedAmount = Number(amount);
+    const payAmount = requestedAmount > 0 ? Math.min(requestedAmount, invoice.balance) : invoice.balance;
+    const newPaid = Number(invoice.paid) + payAmount;
+    const newBalance = Number(invoice.total) - newPaid;
+    const newStatus = newBalance <= 0 ? 'Payée' : 'Partiellement payée';
+
+    const newPayment = {
+      id: `pay-${Date.now()}`,
+      invoice_id: id,
+      reservation_id: invoice.reservation_id,
+      payment_method,
+      amount: payAmount,
+      reference: typeof reference === 'string' ? reference : null,
+      payment_date: new Date().toISOString(),
+      cashier_id: req.user?.name || 'Caissier',
+      status: 'Validé'
+    };
+
+    const results = await db.runTransaction([
+      { type: 'insert', collection: 'payments', item: newPayment },
+      { type: 'update', collection: 'invoices', id, fields: { paid: newPaid, balance: Math.max(0, newBalance), status: newStatus } }
+    ]);
+    if (!results) {
+      return res.status(404).json({ success: false, error: { message: 'Facture introuvable.' } });
+    }
+
+    await logActivity(req.user?.id || 1, 'finance', 'register_invoice_payment', newPayment.id, `Encaissement de ${payAmount} sur la facture ${invoice.invoice_number}`);
+    return res.status(201).json({ success: true, payment: results[0], invoice: results[1] });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ==========================================
 // 7. HRMS (HUMAN RESOURCES) ENDPOINTS
 // ==========================================

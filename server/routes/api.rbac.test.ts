@@ -38,6 +38,7 @@ const cases: Case[] = [
   { method: 'post', path: '/api/reservations/res-1/check-in', deniedRole: 'Housekeeping', label: 'check-in' },
   { method: 'post', path: '/api/reservations/res-1/check-out', deniedRole: 'Housekeeping', label: 'check-out' },
   { method: 'post', path: '/api/finance/payments', deniedRole: 'Housekeeping', label: 'record payment' },
+  { method: 'post', path: '/api/finance/invoices/inv-1/pay', deniedRole: 'Housekeeping', label: 'pay invoice' },
   { method: 'post', path: '/api/hrms/employees', deniedRole: 'Réceptionniste', label: 'create HR employee' },
   { method: 'put', path: '/api/hrms/employees/emp-1', deniedRole: 'Réceptionniste', label: 'update HR employee' },
   { method: 'post', path: '/api/hrms/departments', deniedRole: 'Réceptionniste', label: 'create HR department' },
@@ -94,6 +95,18 @@ describe('RBAC enforcement on write endpoints (server/routes/api.ts)', () => {
       .put('/api/rooms/does-not-exist/status')
       .set('Authorization', `Bearer ${tokenFor('Réceptionniste')}`)
       .send({ current_status: 'Occupée' });
+
+    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(404);
+  });
+
+  it('lets an allowed role (Réceptionniste) past the RBAC gate on POST /api/finance/invoices/:id/pay', async () => {
+    // Nonexistent invoice id: db.getById is a pure read, so this proves the
+    // role check passed without ever calling runTransaction (no write).
+    const res = await request(app)
+      .post('/api/finance/invoices/does-not-exist/pay')
+      .set('Authorization', `Bearer ${tokenFor('Réceptionniste')}`)
+      .send({ payment_method: 'Espèces' });
 
     expect(res.status).not.toBe(403);
     expect(res.status).toBe(404);
