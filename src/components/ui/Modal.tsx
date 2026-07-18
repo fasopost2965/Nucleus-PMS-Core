@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useId } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { X } from 'lucide-react';
@@ -12,6 +12,9 @@ interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title?: string;
+  /** Accessible name to use when the visible title is rendered by `children`
+   * instead of passed as `title` (e.g. ConfirmDialog renders its own heading). */
+  ariaLabel?: string;
   children: React.ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
   footer?: React.ReactNode;
@@ -21,11 +24,13 @@ export function Modal({
   isOpen,
   onClose,
   title,
+  ariaLabel,
   children,
   size = 'md',
   footer,
 }: ModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
 
   useEffect(() => {
     if (!isOpen) return;
@@ -112,6 +117,10 @@ export function Modal({
           <motion.div
             ref={modalRef}
             tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={title ? titleId : undefined}
+            aria-label={title ? undefined : (ariaLabel || 'Dialogue')}
             initial={{ opacity: 0, scale: 0.95, y: 15 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 15 }}
@@ -121,7 +130,7 @@ export function Modal({
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-outline">
               {title ? (
-                <h3 className="text-base font-bold text-on-background tracking-tight">{title}</h3>
+                <h3 id={titleId} className="text-base font-bold text-on-background tracking-tight">{title}</h3>
               ) : (
                 <div />
               )}

@@ -155,6 +155,8 @@ router.post('/auth/forgot-password', async (req, res, next) => {
       console.warn(`[Auth] Code de réinitialisation généré pour ${user.email} mais l'email n'a pas pu être envoyé (${emailResult.reason}).`);
     }
 
+    await logActivity(user.id, 'auth', 'request_password_reset', String(user.id), `Code de réinitialisation demandé pour ${user.email}.`);
+
     // The reset code is only echoed back outside production, for local testing.
     // In production it must be delivered by email — never in the API response.
     return res.status(200).json({
@@ -196,6 +198,7 @@ router.post('/auth/reset-password', async (req, res, next) => {
       reset_code_expires: null
     });
 
+    await logActivity(user.id, 'auth', 'reset_password', String(user.id), `Mot de passe réinitialisé via le code de récupération envoyé par email.`);
     return res.status(200).json({
       success: true,
       message: 'Votre mot de passe a été réinitialisé avec succès !'
@@ -240,6 +243,7 @@ router.post('/auth/change-password', async (req: AuthenticatedRequest, res, next
       must_change_password: false
     });
 
+    await logActivity(user.id, 'auth', 'change_password', String(user.id), `Changement de mot de passe par l'utilisateur lui-même.`);
     return res.status(200).json({
       success: true,
       message: 'Votre mot de passe a été modifié avec succès.'
@@ -939,6 +943,40 @@ router.put('/rooms/:id', requireRole(...ADMIN_ROLES), async (req: AuthenticatedR
   }
 });
 
+// Deliberately separate from PUT /rooms/:id: front-desk/housekeeping staff
+// need to flip a room's operational status (occupied/dirty/maintenance) as
+// part of check-in, check-out and incident reporting, but must never be
+// able to touch the room catalog's pricing/category through the same call
+// — hence a narrow field whitelist instead of reusing the admin-only
+// full-record update endpoint.
+const ROOM_STATUS_FIELDS = ['current_status', 'housekeeping_status', 'maintenance_status'];
+
+router.put('/rooms/:id/status', requireRole(...RECEPTION_ROLES), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    const fields: Record<string, any> = {};
+    for (const key of ROOM_STATUS_FIELDS) {
+      if (req.body[key] !== undefined) fields[key] = req.body[key];
+    }
+    if (Object.keys(fields).length === 0) {
+      return res.status(400).json({ success: false, error: { message: 'Aucun statut valide fourni.' } });
+    }
+
+    const updated = await db.update('rooms', id, {
+      ...fields,
+      updated_by: req.user?.name || 'Réception'
+    });
+    if (!updated) {
+      return res.status(404).json({ success: false, error: { message: 'Chambre introuvable.' } });
+    }
+
+    await logActivity(req.user?.id || 1, 'rooms', 'update_room_status', id, `Changement de statut de la chambre ${updated.room_number} : ${JSON.stringify(fields)}`);
+    return res.status(200).json({ success: true, room: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.delete('/rooms/:id', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
@@ -968,7 +1006,7 @@ router.get('/guests', async (req, res, next) => {
   }
 });
 
-router.post('/guests', requireRole(...RECEPTION_ROLES), async (req, res, next) => {
+router.post('/guests', requireRole(...RECEPTION_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const newGuest = {
       id: `guest-${Date.now()}`,
@@ -979,19 +1017,21 @@ router.post('/guests', requireRole(...RECEPTION_ROLES), async (req, res, next) =
       updated_at: new Date().toISOString()
     };
     const inserted = await db.insert('guests', newGuest);
+    await logActivity(req.user?.id || 1, 'guests', 'create_guest', inserted.id, `Création de la fiche client ${inserted.first_name || ''} ${inserted.last_name || ''}`);
     return res.status(201).json({ success: true, guest: inserted });
   } catch (err) {
     next(err);
   }
 });
 
-router.put('/guests/:id', requireRole(...RECEPTION_ROLES), async (req, res, next) => {
+router.put('/guests/:id', requireRole(...RECEPTION_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     const updated = await db.update('guests', id, req.body);
     if (!updated) {
       return res.status(404).json({ success: false, error: { message: 'Client introuvable.' } });
     }
+    await logActivity(req.user?.id || 1, 'guests', 'update_guest', id, `Mise à jour de la fiche client ${updated.first_name || ''} ${updated.last_name || ''}`);
     return res.status(200).json({ success: true, guest: updated });
   } catch (err) {
     next(err);
@@ -1022,7 +1062,7 @@ router.get('/reservations', async (req, res, next) => {
   }
 });
 
-router.post('/reservations', requireRole(...RECEPTION_ROLES), async (req, res, next) => {
+router.post('/reservations', requireRole(...RECEPTION_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { guest_id, room_id, arrival_date, departure_date, booking_source_id, adults, children, discount, deposit, remarks } = req.body;
     if (!guest_id || !room_id || !arrival_date || !departure_date) {
@@ -1082,18 +1122,25 @@ router.post('/reservations', requireRole(...RECEPTION_ROLES), async (req, res, n
       updated_at: new Date().toISOString()
     };
 
-    const inserted = await db.insert('reservations', newRes);
+    // Creating the reservation and reserving the room happen as a single
+    // atomic operation: a reservation must never exist without its room
+    // being marked unavailable, or vice versa.
+    const results = await db.runTransaction([
+      { type: 'insert', collection: 'reservations', item: newRes },
+      { type: 'update', collection: 'rooms', id: room_id, fields: { current_status: 'Réservée' } }
+    ]);
+    if (!results) {
+      return res.status(400).json({ success: false, error: { message: 'La chambre sélectionnée est invalide ou introuvable.' } });
+    }
 
-    // Auto update room status to reserved
-    await db.update('rooms', room_id, { current_status: 'Réservée' });
-
-    return res.status(201).json({ success: true, reservation: inserted });
+    await logActivity(req.user?.id || 1, 'reservations', 'create_reservation', newRes.id, `Création de la réservation ${newRes.reservation_number}`);
+    return res.status(201).json({ success: true, reservation: results[0] });
   } catch (err) {
     next(err);
   }
 });
 
-router.post('/reservations/:id/check-in', requireRole(...RECEPTION_ROLES), async (req, res, next) => {
+router.post('/reservations/:id/check-in', requireRole(...RECEPTION_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     const reservation = await db.getById('reservations', id);
@@ -1101,14 +1148,59 @@ router.post('/reservations/:id/check-in', requireRole(...RECEPTION_ROLES), async
       return res.status(404).json({ success: false, error: { message: 'Réservation introuvable.' } });
     }
 
-    await db.update('reservations', id, { status: 'En séjour' });
-    await db.update('rooms', reservation.room_id, { current_status: 'Occupée' });
+    // Both status flips must land together: a reservation can never be
+    // "En séjour" while its room is still "Réservée" (or the reverse).
+    const results = await db.runTransaction([
+      { type: 'update', collection: 'reservations', id, fields: { status: 'En séjour' } },
+      { type: 'update', collection: 'rooms', id: reservation.room_id, fields: { current_status: 'Occupée' } }
+    ]);
+    if (!results) {
+      return res.status(404).json({ success: false, error: { message: 'Réservation ou chambre associée introuvable.' } });
+    }
 
+    await logActivity(req.user?.id || 1, 'reservations', 'check_in', id, `Check-in enregistré pour la réservation ${reservation.reservation_number}`);
     return res.status(200).json({
       success: true,
       message: 'Check-in enregistré avec succès',
       roomStatus: 'Occupée',
       reservationStatus: 'En séjour'
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/reservations/:id/check-out', requireRole(...RECEPTION_ROLES), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    const reservation = await db.getById('reservations', id);
+    if (!reservation) {
+      return res.status(404).json({ success: false, error: { message: 'Réservation introuvable.' } });
+    }
+    if (reservation.status !== 'En séjour') {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Seul un séjour en cours peut faire l\'objet d\'un départ.', code: 'INVALID_RESERVATION_STATUS' }
+      });
+    }
+
+    // The room must always come out of "Occupée" the instant the stay ends,
+    // in the same atomic write as the reservation closing — never one
+    // without the other.
+    const results = await db.runTransaction([
+      { type: 'update', collection: 'reservations', id, fields: { status: 'Terminée' } },
+      { type: 'update', collection: 'rooms', id: reservation.room_id, fields: { current_status: 'À nettoyer' } }
+    ]);
+    if (!results) {
+      return res.status(404).json({ success: false, error: { message: 'Réservation ou chambre associée introuvable.' } });
+    }
+
+    await logActivity(req.user?.id || 1, 'reservations', 'check_out', id, `Check-out enregistré pour la réservation ${reservation.reservation_number}`);
+    return res.status(200).json({
+      success: true,
+      message: 'Départ enregistré avec succès',
+      roomStatus: 'À nettoyer',
+      reservationStatus: 'Terminée'
     });
   } catch (err) {
     next(err);
@@ -1151,6 +1243,7 @@ router.post('/finance/payments', requireRole(...RECEPTION_ROLES), async (req: Au
       status: 'Validé'
     };
     const inserted = await db.insert('payments', newPayment);
+    await logActivity(req.user?.id || 1, 'finance', 'record_payment', inserted.id, `Encaissement enregistré (${inserted.amount ?? '?'} ${inserted.currency ?? ''})`.trim());
     return res.status(201).json({ success: true, payment: inserted });
   } catch (err) {
     next(err);
@@ -1197,19 +1290,21 @@ router.post('/hrms/employees', requireRole(...ADMIN_ROLES), async (req: Authenti
     };
     await db.insert('hrms_business_events', newEvent);
 
+    await logActivity(req.user?.id || 1, 'hrms', 'create_employee', inserted.id, `Création de la fiche employé ${newEmployee.first_name || ''} ${newEmployee.last_name || ''}`);
     return res.status(201).json({ success: true, employee: inserted });
   } catch (err) {
     next(err);
   }
 });
 
-router.put('/hrms/employees/:id', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.put('/hrms/employees/:id', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     const updated = await db.update('hrms_employees', id, req.body);
     if (!updated) {
       return res.status(404).json({ success: false, error: { message: 'Employé introuvable.' } });
     }
+    await logActivity(req.user?.id || 1, 'hrms', 'update_employee', id, `Mise à jour de la fiche employé ${updated.first_name || ''} ${updated.last_name || ''}`);
     return res.status(200).json({ success: true, employee: updated });
   } catch (err) {
     next(err);
@@ -1226,7 +1321,7 @@ router.get('/hrms/departments', async (req, res, next) => {
   }
 });
 
-router.post('/hrms/departments', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.post('/hrms/departments', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const newDept = {
       id: `dept-${Date.now()}`,
@@ -1235,6 +1330,7 @@ router.post('/hrms/departments', requireRole(...ADMIN_ROLES), async (req, res, n
       created_at: new Date().toISOString()
     };
     const inserted = await db.insert('hrms_departments', newDept);
+    await logActivity(req.user?.id || 1, 'hrms', 'create_department', inserted.id, `Création du département ${inserted.name || inserted.id}`);
     return res.status(201).json({ success: true, department: inserted });
   } catch (err) {
     next(err);
@@ -1251,7 +1347,7 @@ router.get('/hrms/jobs', async (req, res, next) => {
   }
 });
 
-router.post('/hrms/jobs', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.post('/hrms/jobs', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const newJob = {
       id: `job-${Date.now()}`,
@@ -1260,6 +1356,7 @@ router.post('/hrms/jobs', requireRole(...ADMIN_ROLES), async (req, res, next) =>
       created_at: new Date().toISOString()
     };
     const inserted = await db.insert('hrms_jobs', newJob);
+    await logActivity(req.user?.id || 1, 'hrms', 'create_job', inserted.id, `Création du poste ${inserted.title || inserted.id}`);
     return res.status(201).json({ success: true, job: inserted });
   } catch (err) {
     next(err);
@@ -1276,7 +1373,7 @@ router.get('/hrms/teams', async (req, res, next) => {
   }
 });
 
-router.post('/hrms/teams', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.post('/hrms/teams', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const newTeam = {
       id: `team-${Date.now()}`,
@@ -1285,6 +1382,7 @@ router.post('/hrms/teams', requireRole(...ADMIN_ROLES), async (req, res, next) =
       created_at: new Date().toISOString()
     };
     const inserted = await db.insert('hrms_teams', newTeam);
+    await logActivity(req.user?.id || 1, 'hrms', 'create_team', inserted.id, `Création de l'équipe ${inserted.name || inserted.id}`);
     return res.status(201).json({ success: true, team: inserted });
   } catch (err) {
     next(err);
@@ -1301,7 +1399,7 @@ router.get('/hrms/contracts', async (req, res, next) => {
   }
 });
 
-router.post('/hrms/contracts', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.post('/hrms/contracts', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const newContract = {
       id: `contract-${Date.now()}`,
@@ -1314,19 +1412,21 @@ router.post('/hrms/contracts', requireRole(...ADMIN_ROLES), async (req, res, nex
       updated_at: new Date().toISOString()
     };
     const inserted = await db.insert('hrms_contracts', newContract);
+    await logActivity(req.user?.id || 1, 'hrms', 'create_contract', inserted.id, `Création du contrat ${inserted.id} pour l'employé ${inserted.employee_id || '?'}`);
     return res.status(201).json({ success: true, contract: inserted });
   } catch (err) {
     next(err);
   }
 });
 
-router.put('/hrms/contracts/:id', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.put('/hrms/contracts/:id', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     const updated = await db.update('hrms_contracts', id, req.body);
     if (!updated) {
       return res.status(404).json({ success: false, error: { message: 'Contrat introuvable.' } });
     }
+    await logActivity(req.user?.id || 1, 'hrms', 'update_contract', id, `Mise à jour du contrat ${id}`);
     return res.status(200).json({ success: true, contract: updated });
   } catch (err) {
     next(err);
@@ -1343,13 +1443,14 @@ router.get('/hrms/onboarding-tasks', async (req, res, next) => {
   }
 });
 
-router.put('/hrms/onboarding-tasks/:id', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.put('/hrms/onboarding-tasks/:id', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     const updated = await db.update('hrms_onboarding_tasks', id, req.body);
     if (!updated) {
       return res.status(404).json({ success: false, error: { message: 'Tâche introuvable.' } });
     }
+    await logActivity(req.user?.id || 1, 'hrms', 'update_onboarding_task', id, `Mise à jour de la tâche d'intégration ${id}`);
     return res.status(200).json({ success: true, onboardingTask: updated });
   } catch (err) {
     next(err);
@@ -1408,26 +1509,28 @@ router.get('/room_categories', async (req, res, next) => {
   }
 });
 
-router.put('/room_categories', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.put('/room_categories', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { categories } = req.body;
     if (!categories || !Array.isArray(categories)) {
       return res.status(400).json({ success: false, error: { message: 'Données de catégories invalides.' } });
     }
     await db.saveCollection('room_categories', categories);
+    await logActivity(req.user?.id || 1, 'rooms', 'update_room_categories', null, `Mise à jour de la grille des catégories de chambres (${categories.length} catégories)`);
     return res.status(200).json({ success: true, categories });
   } catch (err) {
     next(err);
   }
 });
 
-router.put('/settings/hotel', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.put('/settings/hotel', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const settingsList = await db.getCollection('hotel_settings');
     const existing = settingsList[0] || { id: 1 };
     const updatedData = { ...existing, ...req.body };
-    
+
     await db.saveCollection('hotel_settings', [updatedData]);
+    await logActivity(req.user?.id || 1, 'settings', 'update_hotel_settings', null, `Mise à jour des paramètres généraux de l'hôtel`);
     return res.status(200).json({ success: true, settings: updatedData });
   } catch (err) {
     next(err);
@@ -1439,7 +1542,7 @@ router.put('/settings/hotel', requireRole(...ADMIN_ROLES), async (req, res, next
 // ==========================================
 import { getInitialSeedData, writeDB, readDB } from '../config/db';
 
-router.post('/system/purge', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.post('/system/purge', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const currentData = readDB();
     const seedBase = getInitialSeedData();
@@ -1480,10 +1583,15 @@ router.post('/system/purge', requireRole(...ADMIN_ROLES), async (req, res, next)
     }
     
     writeDB(purgedData);
-    
-    return res.status(200).json({ 
-      success: true, 
-      message: 'La base de données du serveur a été vidée avec succès.' 
+
+    // Written after the purge on purpose: audit_logs was just wiped along
+    // with everything else, so this is deliberately the first entry in the
+    // fresh log — the purge action itself must never go unrecorded.
+    await logActivity(req.user?.id || 1, 'system', 'purge_database', null, `Purge complète des données opérationnelles effectuée par l'administrateur (comptes utilisateurs conservés).`);
+
+    return res.status(200).json({
+      success: true,
+      message: 'La base de données du serveur a été vidée avec succès.'
     });
   } catch (err) {
     next(err);
@@ -1544,7 +1652,7 @@ router.get('/system/sync', requireRole(...ADMIN_ROLES), async (req, res, next) =
   }
 });
 
-router.post('/system/sync', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.post('/system/sync', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { collectionName, data } = req.body;
     if (!collectionName || !Array.isArray(data)) {
@@ -1557,13 +1665,14 @@ router.post('/system/sync', requireRole(...ADMIN_ROLES), async (req, res, next) 
     }
 
     await db.saveCollection(serverCol, data);
+    await logActivity(req.user?.id || 1, 'system', 'sync_collection', null, `Synchronisation de la collection "${serverCol}" (${data.length} enregistrements) depuis le client.`);
     return res.status(200).json({ success: true });
   } catch (err) {
     next(err);
   }
 });
 
-router.post('/system/seed', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.post('/system/seed', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const seedData = getInitialSeedData();
     if (seedData.hotel_settings) {
@@ -1571,9 +1680,10 @@ router.post('/system/seed', requireRole(...ADMIN_ROLES), async (req, res, next) 
     }
     // Reset back to standard mock/seed data
     writeDB(seedData);
-    return res.status(200).json({ 
-      success: true, 
-      message: 'Les données de démonstration du serveur ont été restaurées avec succès.' 
+    await logActivity(req.user?.id || 1, 'system', 'seed_database', null, `Réinitialisation de la base de données aux données de démonstration effectuée par l'administrateur.`);
+    return res.status(200).json({
+      success: true,
+      message: 'Les données de démonstration du serveur ont été restaurées avec succès.'
     });
   } catch (err) {
     next(err);

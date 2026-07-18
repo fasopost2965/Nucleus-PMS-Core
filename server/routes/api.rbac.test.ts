@@ -28,6 +28,7 @@ type Case = { method: 'post' | 'put' | 'delete'; path: string; deniedRole: strin
 const cases: Case[] = [
   { method: 'post', path: '/api/rooms', deniedRole: 'Réceptionniste', label: 'create room' },
   { method: 'put', path: '/api/rooms/room-1', deniedRole: 'Housekeeping', label: 'update room' },
+  { method: 'put', path: '/api/rooms/room-1/status', deniedRole: 'Housekeeping', label: 'update room status' },
   { method: 'delete', path: '/api/rooms/room-1', deniedRole: 'Réceptionniste', label: 'delete room' },
   { method: 'put', path: '/api/room_categories', deniedRole: 'Réceptionniste', label: 'update room categories/pricing' },
   { method: 'put', path: '/api/settings/hotel', deniedRole: 'Réceptionniste', label: 'update hotel settings' },
@@ -35,6 +36,7 @@ const cases: Case[] = [
   { method: 'put', path: '/api/guests/guest-1', deniedRole: 'Technicien Maintenance', label: 'update guest' },
   { method: 'post', path: '/api/reservations', deniedRole: 'Magasinier / Stock', label: 'create reservation' },
   { method: 'post', path: '/api/reservations/res-1/check-in', deniedRole: 'Housekeeping', label: 'check-in' },
+  { method: 'post', path: '/api/reservations/res-1/check-out', deniedRole: 'Housekeeping', label: 'check-out' },
   { method: 'post', path: '/api/finance/payments', deniedRole: 'Housekeeping', label: 'record payment' },
   { method: 'post', path: '/api/hrms/employees', deniedRole: 'Réceptionniste', label: 'create HR employee' },
   { method: 'put', path: '/api/hrms/employees/emp-1', deniedRole: 'Réceptionniste', label: 'update HR employee' },
@@ -76,6 +78,27 @@ describe('RBAC enforcement on write endpoints (server/routes/api.ts)', () => {
     expect(res.status).toBe(400);
   });
 
+  it('rejects PUT /api/rooms/:id/status with no recognized status field, before touching the DB', async () => {
+    const res = await request(app)
+      .put('/api/rooms/room-1/status')
+      .set('Authorization', `Bearer ${tokenFor('Réceptionniste')}`)
+      .send({ base_price: 999999 }); // not a whitelisted status field
+
+    expect(res.status).toBe(400);
+  });
+
+  it('lets an allowed role (Réceptionniste) past the RBAC gate on PUT /api/rooms/:id/status', async () => {
+    // Nonexistent room id: db.update returns null (404) before ever calling
+    // saveCollection, so this proves the role check passed without writing.
+    const res = await request(app)
+      .put('/api/rooms/does-not-exist/status')
+      .set('Authorization', `Bearer ${tokenFor('Réceptionniste')}`)
+      .send({ current_status: 'Occupée' });
+
+    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(404);
+  });
+
   it('lets an allowed role (Réceptionniste) past the RBAC gate on POST /api/reservations', async () => {
     const res = await request(app)
       .post('/api/reservations')
@@ -84,5 +107,17 @@ describe('RBAC enforcement on write endpoints (server/routes/api.ts)', () => {
 
     expect(res.status).not.toBe(403);
     expect(res.status).toBe(400);
+  });
+
+  it('lets an allowed role (Réceptionniste) past the RBAC gate on POST /api/reservations/:id/check-out', async () => {
+    // Nonexistent reservation id: db.getById is a pure read, so this proves
+    // the role check passed without ever calling runTransaction (no write).
+    const res = await request(app)
+      .post('/api/reservations/does-not-exist/check-out')
+      .set('Authorization', `Bearer ${tokenFor('Réceptionniste')}`)
+      .send({});
+
+    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(404);
   });
 });

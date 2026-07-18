@@ -1,5 +1,25 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
+
+/* Self-hosted fonts (previously loaded from fonts.googleapis.com at every
+   page load, which broke the app's own offline-resilience goal — see
+   BRUNCH_BOUAKE_PMS/00_VISION/01_PROJECT_OVERVIEW.md). Both are variable
+   fonts covering their full weight range from a single file, under the SIL
+   Open Font License 1.1, which permits redistribution. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+  src: url("/fonts/inter-variable-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url("/fonts/jetbrains-mono-variable-latin.woff2") format("woff2");
+}
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;

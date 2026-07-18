@@ -105,6 +105,8 @@ export const api = {
   },
   createRoom: (data: any) => request('/rooms', { method: 'POST', body: JSON.stringify(data) }),
   updateRoom: (id: string, data: any) => request(`/rooms/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  updateRoomStatus: (id: string, data: { current_status?: string; housekeeping_status?: string; maintenance_status?: string }) =>
+    request(`/rooms/${id}/status`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteRoom: (id: string) => request(`/rooms/${id}`, { method: 'DELETE' }),
 
   getRoomCategories: async (): Promise<any[]> => {
@@ -132,6 +134,7 @@ export const api = {
   },
   createReservation: (data: any) => request('/reservations', { method: 'POST', body: JSON.stringify(data) }),
   checkInReservation: (id: string) => request(`/reservations/${id}/check-in`, { method: 'POST' }),
+  checkOutReservation: (id: string) => request(`/reservations/${id}/check-out`, { method: 'POST' }),
 
   // HRMS API
   getEmployees: async (): Promise<any[]> => {

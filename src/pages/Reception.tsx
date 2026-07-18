@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Bell,
   CheckCircle,
@@ -23,39 +23,23 @@ import {
   UserPlus
 } from 'lucide-react';
 import { PageHeader, Badge, AlertBanner } from '../components/ui/pms-ui';
-import { mockRooms, mockGuests, mockReservations, mockInvoices } from '../mockData';
+import { mockInvoices } from '../mockData';
 import { IRoom, IReservation, IGuest, TRoomStatus, IInvoice } from '../types';
+import { api } from '../utils/api';
 import { handleRoomMaintenanceTrigger } from '../stockService';
 import PrintableReceipt from '../components/ui/PrintableReceipt';
 import { Printer } from 'lucide-react';
 
 export default function Reception() {
-  const [rooms, setRooms] = useState<IRoom[]>(() => {
-    const stored = localStorage.getItem('pms_rooms');
-    if (stored) {
-      try { return JSON.parse(stored); } catch (e) {}
-    }
-    return mockRooms;
-  });
+  const [rooms, setRooms] = useState<IRoom[]>([]);
+  const [reservations, setReservations] = useState<IReservation[]>([]);
+  const [guests, setGuests] = useState<IGuest[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
   const [selectedRoom, setSelectedRoom] = useState<IRoom | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-
-  const [reservations, setReservations] = useState<IReservation[]>(() => {
-    const stored = localStorage.getItem('pms_reservations');
-    if (stored) {
-      try { return JSON.parse(stored); } catch (e) {}
-    }
-    return mockReservations;
-  });
-
-  const [guests, setGuests] = useState<IGuest[]>(() => {
-    const stored = localStorage.getItem('pms_guests');
-    if (stored) {
-      try { return JSON.parse(stored); } catch (e) {}
-    }
-    return mockGuests;
-  });
+  const [errorMsg, setErrorMsg] = useState('');
 
   // Dialog/Modal state for Check-in / Check-out
   const [activeTab, setActiveTab] = useState<'plan' | 'arrivals' | 'departures'>('plan');
@@ -66,6 +50,29 @@ export default function Reception() {
     guest: IGuest;
     reservation: IReservation;
   } | null>(null);
+
+  const loadData = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const [roomsData, reservationsData, guestsData] = await Promise.all([
+        api.getRooms(),
+        api.getReservations(),
+        api.getGuests()
+      ]);
+      setRooms(roomsData);
+      setReservations(reservationsData);
+      setGuests(guestsData);
+      setErrorMsg('');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Impossible de charger les données de réception.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const triggerPrintReceiptForReservation = (res: IReservation) => {
     const guest = guests.find(g => g.id === res.guest_id);
@@ -94,7 +101,7 @@ export default function Reception() {
       reservation: res
     });
   };
-  
+
   // Calculate operational widgets
   const arrivalsCount = reservations.filter(r => r.status === 'Confirmée').length;
   const departuresCount = reservations.filter(r => r.status === 'En séjour').length; // simulated for demo
@@ -106,25 +113,30 @@ export default function Reception() {
     setSelectedRoom(room);
   };
 
-  const updateRoomStatus = (roomId: string, newStatus: TRoomStatus) => {
-    const updatedRooms = rooms.map(r => r.id === roomId ? { ...r, current_status: newStatus } : r);
-    setRooms(updatedRooms);
-    localStorage.setItem('pms_rooms', JSON.stringify(updatedRooms));
-    if (selectedRoom && selectedRoom.id === roomId) {
-      setSelectedRoom({ ...selectedRoom, current_status: newStatus });
-    }
-
-    let maintenanceMsg = "";
-    if (newStatus === 'Maintenance') {
-      const res = handleRoomMaintenanceTrigger(roomId, 'Réception (Front Desk)');
-      if (res.success) {
-        maintenanceMsg = " • " + res.message;
-      }
-    }
-
+  const updateRoomStatus = async (roomId: string, newStatus: TRoomStatus) => {
     const roomNum = rooms.find(r => r.id === roomId)?.room_number || "";
-    setSuccessMsg(`Statut de la chambre ${roomNum} mis à jour : ${newStatus}.${maintenanceMsg}`);
-    setTimeout(() => setSuccessMsg(''), 6000);
+    try {
+      const res = await api.updateRoomStatus(roomId, { current_status: newStatus });
+      const updatedRoom = res.room as IRoom;
+      setRooms(prev => prev.map(r => r.id === roomId ? updatedRoom : r));
+      if (selectedRoom && selectedRoom.id === roomId) {
+        setSelectedRoom(updatedRoom);
+      }
+
+      let maintenanceMsg = "";
+      if (newStatus === 'Maintenance') {
+        const maintResult = handleRoomMaintenanceTrigger(roomId, 'Réception (Front Desk)');
+        if (maintResult.success) {
+          maintenanceMsg = " • " + maintResult.message;
+        }
+      }
+
+      setErrorMsg('');
+      setSuccessMsg(`Statut de la chambre ${roomNum} mis à jour : ${newStatus}.${maintenanceMsg}`);
+      setTimeout(() => setSuccessMsg(''), 6000);
+    } catch (err: any) {
+      setErrorMsg(err.message || `Échec de la mise à jour du statut de la chambre ${roomNum}.`);
+    }
   };
 
   const getGuestForRoom = (roomNum: string) => {
@@ -142,18 +154,24 @@ export default function Reception() {
     return reservations.find(r => r.room_id === roomId && r.status === 'En séjour');
   };
 
-  const handleCheckIn = (resId: string, roomId: string) => {
-    updateRoomStatus(roomId, 'Occupée');
-    const updated = reservations.map(r => r.id === resId ? { ...r, status: 'En séjour' as const } : r);
-    setReservations(updated);
-    localStorage.setItem('pms_reservations', JSON.stringify(updated));
+  const handleCheckIn = async (resId: string, roomId: string) => {
+    try {
+      await api.checkInReservation(resId);
+      setErrorMsg('');
+      await loadData();
+    } catch (err: any) {
+      setErrorMsg(err.message || "Échec de l'enregistrement du check-in.");
+    }
   };
 
-  const handleCheckOut = (resId: string, roomId: string) => {
-    updateRoomStatus(roomId, 'À nettoyer');
-    const updated = reservations.map(r => r.id === resId ? { ...r, status: 'Terminée' as const } : r);
-    setReservations(updated);
-    localStorage.setItem('pms_reservations', JSON.stringify(updated));
+  const handleCheckOut = async (resId: string, roomId: string) => {
+    try {
+      await api.checkOutReservation(resId);
+      setErrorMsg('');
+      await loadData();
+    } catch (err: any) {
+      setErrorMsg(err.message || "Échec de l'enregistrement du check-out.");
+    }
   };
 
   return (
@@ -164,8 +182,15 @@ export default function Reception() {
       />
 
       <div className="p-6 lg:p-8 space-y-6 flex-1 overflow-y-auto">
+        {errorMsg && (
+          <AlertBanner text={errorMsg} type="error" />
+        )}
         {successMsg && (
           <AlertBanner text={successMsg} type="success" />
+        )}
+
+        {isLoading && (
+          <AlertBanner text="Chargement des chambres, réservations et clients..." type="info" />
         )}
 
         {/* OPERATIONS SUMMARY WIDGETS */}

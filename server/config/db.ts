@@ -462,6 +462,72 @@ export function writeDB(data: any): void {
   }
 }
 
+// Applies a single UPDATE inside an existing MySQL transaction, restricting
+// the SET clause to columns that actually exist on the table (mirrors the
+// dynamic-column-detection already used by saveCollection).
+async function applyUpdateInTransaction(
+  connection: mysql.PoolConnection,
+  table: string,
+  id: string | number,
+  fields: Record<string, any>,
+  timestamp: string
+): Promise<void> {
+  const [columnsInfo] = await connection.query(`DESCRIBE \`${table}\``);
+  const allowedColumns = (columnsInfo as any[]).map((col) => col.Field);
+  const keys = Object.keys(fields).filter((k) => allowedColumns.includes(k) && k !== 'id');
+  if (keys.length === 0) return;
+
+  const setClause = keys.map((k) => `\`${k}\` = ?`).join(', ');
+  const values = keys.map((k) => {
+    const val = fields[k];
+    if (typeof val === 'object' && val !== null) return JSON.stringify(val);
+    if (typeof val === 'boolean') return val ? 1 : 0;
+    return val;
+  });
+
+  const hasUpdatedAt = allowedColumns.includes('updated_at');
+  const sql = hasUpdatedAt
+    ? `UPDATE \`${table}\` SET ${setClause}, \`updated_at\` = ? WHERE \`id\` = ?`
+    : `UPDATE \`${table}\` SET ${setClause} WHERE \`id\` = ?`;
+  const params = hasUpdatedAt ? [...values, timestamp, id] : [...values, id];
+
+  await connection.query(sql, params);
+}
+
+// Applies a single INSERT (or upsert) inside an existing MySQL transaction.
+async function applyInsertInTransaction(
+  connection: mysql.PoolConnection,
+  table: string,
+  item: Record<string, any>
+): Promise<void> {
+  const [columnsInfo] = await connection.query(`DESCRIBE \`${table}\``);
+  const allowedColumns = (columnsInfo as any[]).map((col) => col.Field);
+  const keys = Object.keys(item).filter((k) => allowedColumns.includes(k));
+  if (keys.length === 0) return;
+
+  const columns = keys.map((k) => `\`${k}\``).join(', ');
+  const placeholders = keys.map(() => '?').join(', ');
+  const updateExpression = keys
+    .filter((k) => k !== 'id' && k !== 'created_at')
+    .map((k) => `\`${k}\` = VALUES(\`${k}\`)`)
+    .join(', ');
+  const values = keys.map((k) => {
+    const val = item[k];
+    if (typeof val === 'object' && val !== null) return JSON.stringify(val);
+    if (typeof val === 'boolean') return val ? 1 : 0;
+    return val;
+  });
+
+  let sql = `INSERT INTO \`${table}\` (${columns}) VALUES (${placeholders})`;
+  if (updateExpression) sql += ` ON DUPLICATE KEY UPDATE ${updateExpression}`;
+
+  await connection.query(sql, values);
+}
+
+export type TransactionMutation =
+  | { type: 'insert'; collection: string; item: Record<string, any> }
+  | { type: 'update'; collection: string; id: string | number; fields: Record<string, any> };
+
 // General DB abstraction API
 export const db = {
   getCollection: async (name: string): Promise<any[]> => {
@@ -609,9 +675,79 @@ export const db = {
     const initialLen = items.length;
     const filtered = items.filter((item: any) => item.id != id);
     if (filtered.length === initialLen) return false;
-    
+
     await db.saveCollection(collectionName, filtered);
     return true;
+  },
+
+  // Applies several mutations across one or more collections as a single
+  // atomic unit, so a reservation status and its room status (for example)
+  // can never be persisted out of sync with each other. The local JSON
+  // store — the durable record whenever MySQL is offline — is updated with
+  // one file write for the whole batch; if any referenced record is
+  // missing, nothing is written at all. When MySQL is the active backend,
+  // the same mutations are mirrored inside a real SQL transaction
+  // (COMMIT/ROLLBACK) as a best-effort sync, matching the existing
+  // JSON-primary / MySQL-mirror pattern used elsewhere in this file.
+  runTransaction: async (mutations: TransactionMutation[]): Promise<any[] | null> => {
+    const data = readDB();
+    const now = new Date().toISOString();
+    const results: any[] = [];
+
+    for (const mutation of mutations) {
+      const items = data[mutation.collection] || [];
+      if (mutation.type === 'insert') {
+        const record = { created_at: now, ...mutation.item, updated_at: now };
+        items.push(record);
+        data[mutation.collection] = items;
+        results.push(record);
+      } else {
+        const index = items.findIndex((item: any) => item.id == mutation.id);
+        if (index === -1) {
+          return null; // Abort before writing anything: nothing partially applied.
+        }
+        items[index] = { ...items[index], ...mutation.fields, updated_at: now };
+        data[mutation.collection] = items;
+        results.push(items[index]);
+      }
+    }
+
+    writeDB(data);
+
+    if (useMySQL && pool && isMySQLOnline) {
+      let connection: mysql.PoolConnection | undefined;
+      try {
+        connection = await pool.getConnection();
+        await connection.beginTransaction();
+        for (let i = 0; i < mutations.length; i++) {
+          const mutation = mutations[i];
+          if (mutation.type === 'insert') {
+            await applyInsertInTransaction(connection, mutation.collection, results[i]);
+          } else {
+            await applyUpdateInTransaction(connection, mutation.collection, mutation.id, mutation.fields, now);
+          }
+        }
+        await connection.commit();
+      } catch (err: any) {
+        if (connection) {
+          try {
+            await connection.rollback();
+          } catch {
+            // ignore rollback failure — connection is likely already broken
+          }
+        }
+        if (isConnectionError(err)) {
+          isMySQLOnline = false;
+          console.warn('[Database MySQL] Connection lost during transactional update. Switched silently to Local JSON Fallback.');
+        } else {
+          console.error('[Database MySQL] Transactional mirror failed (JSON fallback already applied):', err.message);
+        }
+      } finally {
+        connection?.release();
+      }
+    }
+
+    return results;
   },
 
   getDiagnostics: async () => {
