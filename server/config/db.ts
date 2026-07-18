@@ -5,10 +5,14 @@ import bcrypt from 'bcryptjs';
 
 // Database config variables
 const DB_HOST = process.env.DB_HOST || '';
-const DB_USER = process.env.DB_USER || 'u707543112_brunch_pms';
-const DB_PASSWORD = process.env.DB_PASSWORD || 'Prodesk@2965';
-const DB_NAME = process.env.DB_NAME || 'u707543112_brunch_pms';
+const DB_USER = process.env.DB_USER || '';
+const DB_PASSWORD = process.env.DB_PASSWORD || '';
+const DB_NAME = process.env.DB_NAME || '';
 const DB_PORT = process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 3306;
+
+if (DB_HOST && (!DB_USER || !DB_PASSWORD || !DB_NAME)) {
+  throw new Error('[Config] DB_HOST est défini mais DB_USER, DB_PASSWORD ou DB_NAME est manquant. Définissez ces variables d\'environnement avant de démarrer le serveur.');
+}
 
 let pool: mysql.Pool | null = null;
 const useMySQL = !!DB_HOST;

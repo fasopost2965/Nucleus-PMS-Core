@@ -210,7 +210,7 @@ router.post('/auth/change-password', async (req: AuthenticatedRequest, res, next
       return res.status(404).json({ success: false, error: { message: 'Utilisateur introuvable.' } });
     }
 
-    const passwordMatch = bcrypt.compareSync(currentPassword, user.password_hash) || currentPassword === 'Prodesk@2026';
+    const passwordMatch = bcrypt.compareSync(currentPassword, user.password_hash);
     if (!passwordMatch) {
       return res.status(400).json({ success: false, error: { message: 'Le mot de passe actuel est incorrect.' } });
     }
@@ -261,7 +261,7 @@ router.get('/users', async (req, res, next) => {
   }
 });
 
-router.post('/users', async (req: AuthenticatedRequest, res, next) => {
+router.post('/users', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { first_name, last_name, email, password, role, phone, privileges } = req.body;
     
@@ -384,7 +384,7 @@ router.post('/users', async (req: AuthenticatedRequest, res, next) => {
   }
 });
 
-router.put('/users/:id', async (req: AuthenticatedRequest, res, next) => {
+router.put('/users/:id', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     const { first_name, last_name, email, password, role, phone, privileges, status } = req.body;
@@ -440,7 +440,7 @@ router.put('/users/:id', async (req: AuthenticatedRequest, res, next) => {
   }
 });
 
-router.delete('/users/:id', async (req: AuthenticatedRequest, res, next) => {
+router.delete('/users/:id', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     const user = await db.getById('users', id);
@@ -461,7 +461,7 @@ router.delete('/users/:id', async (req: AuthenticatedRequest, res, next) => {
 // SYSTEM ADMINISTRATION ENDPOINTS
 // ==========================================
 
-router.get('/admin/db-diagnostics', async (req: AuthenticatedRequest, res, next) => {
+router.get('/admin/db-diagnostics', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const diagnostics = await db.getDiagnostics();
     return res.status(200).json({ success: true, diagnostics });
@@ -470,7 +470,7 @@ router.get('/admin/db-diagnostics', async (req: AuthenticatedRequest, res, next)
   }
 });
 
-router.get('/admin/debug-user-creation', async (req: AuthenticatedRequest, res, next) => {
+router.get('/admin/debug-user-creation', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const schemaInfo = await db.inspectUsersSchema();
     return res.status(200).json({ success: true, schemaInfo });
@@ -479,7 +479,7 @@ router.get('/admin/debug-user-creation', async (req: AuthenticatedRequest, res, 
   }
 });
 
-router.get('/admin/backup', async (req: AuthenticatedRequest, res, next) => {
+router.get('/admin/backup', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const backupData = await db.backup();
     await logActivity(req.user?.id || 1, 'admin', 'backup_db', null, `Sauvegarde complète de la base de données exportée par l'administrateur`);
@@ -497,7 +497,7 @@ router.get('/admin/backup', async (req: AuthenticatedRequest, res, next) => {
   }
 });
 
-router.post('/admin/restore', async (req: AuthenticatedRequest, res, next) => {
+router.post('/admin/restore', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const backupData = req.body;
     if (!backupData || typeof backupData !== 'object') {
@@ -519,7 +519,7 @@ router.post('/admin/restore', async (req: AuthenticatedRequest, res, next) => {
   }
 });
 
-router.get('/admin/backup-config', async (req: AuthenticatedRequest, res, next) => {
+router.get('/admin/backup-config', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const settings = await db.getCollection('settings');
     const system_config = await db.getCollection('system_config');
@@ -548,7 +548,7 @@ router.get('/admin/backup-config', async (req: AuthenticatedRequest, res, next) 
   }
 });
 
-router.post('/admin/restore-config', async (req: AuthenticatedRequest, res, next) => {
+router.post('/admin/restore-config', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const backupData = req.body;
     if (!backupData || typeof backupData !== 'object') {
