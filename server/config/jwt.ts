@@ -1,6 +1,10 @@
 import jwt from 'jsonwebtoken';
 
-export const JWT_SECRET = process.env.JWT_SECRET || 'nucleus_pms_super_secret_key_2026';
+if (!process.env.JWT_SECRET) {
+  throw new Error('[Config] JWT_SECRET manquant. Définissez la variable d\'environnement JWT_SECRET avant de démarrer le serveur.');
+}
+
+export const JWT_SECRET = process.env.JWT_SECRET;
 export const JWT_EXPIRES_IN = '24h';
 
 export interface IJwtPayload {
