@@ -5,6 +5,7 @@ import { generateToken } from '../config/jwt';
 import { authMiddleware, AuthenticatedRequest } from '../middlewares/authMiddleware';
 import { requireRole } from '../middlewares/roleMiddleware';
 import { ADMIN_ROLES, RECEPTION_ROLES, resolveRole } from '../config/roles';
+import { hasOverlappingReservation, computeNights, computeReservationPricing } from '../services/reservationPricing';
 
 const router = Router();
 
@@ -1009,7 +1010,7 @@ router.get('/reservations', async (req, res, next) => {
 
 router.post('/reservations', requireRole(...RECEPTION_ROLES), async (req, res, next) => {
   try {
-    const { guest_id, room_id, arrival_date, departure_date, room_rate } = req.body;
+    const { guest_id, room_id, arrival_date, departure_date, booking_source_id, adults, children, discount, deposit, remarks } = req.body;
     if (!guest_id || !room_id || !arrival_date || !departure_date) {
       return res.status(400).json({ success: false, error: { message: 'Champs obligatoires manquants.' } });
     }
@@ -1030,24 +1031,45 @@ router.post('/reservations', requireRole(...RECEPTION_ROLES), async (req, res, n
       return res.status(400).json({ success: false, error: { message: 'La chambre sélectionnée est invalide ou introuvable.' } });
     }
 
+    const guests = await db.getCollection('guests');
+    if (!guests.some((g: any) => g.id === guest_id)) {
+      return res.status(400).json({ success: false, error: { message: 'Le client sélectionné est invalide ou introuvable.' } });
+    }
+
+    // A new reservation must not overlap an existing active one for the same room.
+    const existingReservations = await db.getCollection('reservations');
+    if (hasOverlappingReservation(existingReservations, room_id, arrDate, depDate)) {
+      return res.status(409).json({
+        success: false,
+        error: { message: 'Cette chambre est déjà réservée sur tout ou partie de cette période.', code: 'ROOM_ALREADY_BOOKED' }
+      });
+    }
+
+    // Pricing is computed server-side only. The room rate always comes from the
+    // room catalog (never from the client payload), so a caller cannot fabricate
+    // an arbitrary total_amount/balance/status by sending extra fields.
+    const nights = computeNights(arrDate, depDate);
+    const pricing = computeReservationPricing({ basePrice: validRoom.base_price, nights, discount, deposit });
+
     const newRes = {
       id: `res-${Date.now()}`,
       reservation_number: `RES-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+      guest_id,
+      room_id,
+      booking_source_id: booking_source_id || null,
       status: 'Confirmée',
-      adults: 1,
-      children: 0,
-      discount: 0,
-      tax_amount: 0,
-      deposit: 0,
-      balance: Number(room_rate || 35000),
-      total_amount: Number(room_rate || 35000),
-      ...req.body,
+      arrival_date,
+      departure_date,
+      adults: Number(adults) > 0 ? Number(adults) : 1,
+      children: Number(children) >= 0 ? Number(children) : 0,
+      ...pricing,
+      remarks: typeof remarks === 'string' ? remarks : '',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
 
     const inserted = await db.insert('reservations', newRes);
-    
+
     // Auto update room status to reserved
     await db.update('rooms', room_id, { current_status: 'Réservée' });
 
