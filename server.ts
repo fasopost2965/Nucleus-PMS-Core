@@ -2,11 +2,11 @@ import express from 'express';
 import path from 'path';
 import helmet from 'helmet';
 import cors from 'cors';
-import rateLimit from 'express-rate-limit';
 import { createServer as createViteServer } from 'vite';
 import apiRouter from './server/routes/api';
 import { errorHandler } from './server/middlewares/errorHandler';
 import { startBackupScheduler } from './server/config/scheduler';
+import { createAuthRateLimiter } from './server/middlewares/rateLimiters';
 
 async function startServer() {
   const app = express();
@@ -24,17 +24,12 @@ async function startServer() {
     credentials: true
   }));
 
-  const loginLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    limit: 10,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: {
-      success: false,
-      error: { message: 'Trop de tentatives de connexion. Réessayez plus tard.', code: 'TOO_MANY_REQUESTS' }
-    }
-  });
+  const loginLimiter = createAuthRateLimiter('Trop de tentatives de connexion. Réessayez plus tard.');
+  const forgotPasswordLimiter = createAuthRateLimiter('Trop de demandes de réinitialisation. Réessayez plus tard.');
+  const resetPasswordLimiter = createAuthRateLimiter('Trop de tentatives. Réessayez plus tard.');
   app.use('/api/auth/login', loginLimiter);
+  app.use('/api/auth/forgot-password', forgotPasswordLimiter);
+  app.use('/api/auth/reset-password', resetPasswordLimiter);
 
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));

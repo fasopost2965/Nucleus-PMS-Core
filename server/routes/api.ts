@@ -4,8 +4,9 @@ import { db } from '../config/db';
 import { generateToken } from '../config/jwt';
 import { authMiddleware, AuthenticatedRequest } from '../middlewares/authMiddleware';
 import { requireRole } from '../middlewares/roleMiddleware';
-
-const ADMIN_ROLES = ['Super Administrateur', 'Directeur'];
+import { ADMIN_ROLES, RECEPTION_ROLES, resolveRole } from '../config/roles';
+import { hasOverlappingReservation, computeNights, computeReservationPricing } from '../services/reservationPricing';
+import { sendPasswordResetEmail } from '../services/mailer';
 
 const router = Router();
 
@@ -45,7 +46,7 @@ router.post('/auth/login', async (req, res, next) => {
     const token = generateToken({
       id: user.id,
       email: user.email,
-      role: user.role || 'Super Administrateur',
+      role: resolveRole(user),
       name: `${user.first_name} ${user.last_name}`
     });
 
@@ -87,7 +88,7 @@ router.post('/auth/login', async (req, res, next) => {
         firstName: user.first_name,
         lastName: user.last_name,
         email: user.email,
-        role: user.role || 'Super Administrateur',
+        role: resolveRole(user),
         privileges: getUserPrivilegesList(user),
         mustChangePassword: !!user.must_change_password
       }
@@ -128,8 +129,14 @@ router.post('/auth/forgot-password', async (req, res, next) => {
     }
     const users = await db.getCollection('users');
     const user = users.find((u: any) => u.email.toLowerCase() === email.toLowerCase().trim());
+
+    // Always return the same generic response whether or not the account
+    // exists — returning 404 only for unknown emails turns this endpoint
+    // into an account-enumeration oracle.
+    const genericMessage = 'Si un compte existe pour cette adresse email, un code de réinitialisation a été généré.';
+
     if (!user) {
-      return res.status(404).json({ success: false, error: { message: 'Aucun compte associé à cette adresse email.' } });
+      return res.status(200).json({ success: true, message: genericMessage });
     }
 
     // Generate a 6-digit numeric reset code
@@ -141,11 +148,18 @@ router.post('/auth/forgot-password', async (req, res, next) => {
       reset_code_expires: expiry
     });
 
+    const hotelSettings = await db.getCollection('hotel_settings');
+    const hotelName = hotelSettings[0]?.hotel_name || 'Nucleus PMS';
+    const emailResult = await sendPasswordResetEmail(user.email, resetCode, hotelName);
+    if (!emailResult.sent) {
+      console.warn(`[Auth] Code de réinitialisation généré pour ${user.email} mais l'email n'a pas pu être envoyé (${emailResult.reason}).`);
+    }
+
     // The reset code is only echoed back outside production, for local testing.
-    // In production it must be delivered out-of-band (email/SMS) — never in the API response.
+    // In production it must be delivered by email — never in the API response.
     return res.status(200).json({
       success: true,
-      message: 'Un code de réinitialisation vous a été généré.',
+      message: genericMessage,
       ...(process.env.NODE_ENV !== 'production' ? { devCode: resetCode } : {})
     });
   } catch (err) {
@@ -250,7 +264,7 @@ router.get('/users', async (req, res, next) => {
       first_name: u.first_name || '',
       last_name: u.last_name || '',
       email: u.email,
-      role: u.role || 'Super Administrateur',
+      role: resolveRole(u),
       status: u.status === 'suspended' ? 'Suspendu' : 'Actif',
       phone: u.phone || '',
       privileges: u.privileges || []
@@ -625,7 +639,7 @@ router.get('/activity-logs', async (req: AuthenticatedRequest, res, next) => {
           first_name: u.first_name,
           last_name: u.last_name,
           email: u.email,
-          role: u.role || 'Super Administrateur'
+          role: resolveRole(u)
         } : null
       };
     });
@@ -659,7 +673,7 @@ router.post('/auth/extend-session', async (req: AuthenticatedRequest, res, next)
     const token = generateToken({
       id: user.id,
       email: user.email,
-      role: user.role || 'Super Administrateur',
+      role: resolveRole(user),
       name: `${user.first_name} ${user.last_name}`
     });
 
@@ -703,7 +717,7 @@ router.post('/auth/extend-session', async (req: AuthenticatedRequest, res, next)
         firstName: user.first_name,
         lastName: user.last_name,
         email: user.email,
-        role: user.role || 'Super Administrateur',
+        role: resolveRole(user),
         privileges: getUserPrivilegesList(user),
         mustChangePassword: !!user.must_change_password
       }
@@ -771,7 +785,7 @@ router.get('/auth/verify', async (req: AuthenticatedRequest, res, next) => {
         firstName: user.first_name,
         lastName: user.last_name,
         email: user.email,
-        role: user.role || 'Super Administrateur',
+        role: resolveRole(user),
         privileges: getUserPrivilegesList(user),
         mustChangePassword: !!user.must_change_password
       }
@@ -857,7 +871,7 @@ router.get('/rooms', async (req, res, next) => {
   }
 });
 
-router.post('/rooms', async (req: AuthenticatedRequest, res, next) => {
+router.post('/rooms', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { room_number, category_id, floor, capacity, bed_type, area, base_price, amenities, notes } = req.body;
     
@@ -906,7 +920,7 @@ router.post('/rooms', async (req: AuthenticatedRequest, res, next) => {
   }
 });
 
-router.put('/rooms/:id', async (req: AuthenticatedRequest, res, next) => {
+router.put('/rooms/:id', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     const updated = await db.update('rooms', id, {
@@ -925,7 +939,7 @@ router.put('/rooms/:id', async (req: AuthenticatedRequest, res, next) => {
   }
 });
 
-router.delete('/rooms/:id', async (req: AuthenticatedRequest, res, next) => {
+router.delete('/rooms/:id', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     const room = await db.getById('rooms', id);
@@ -954,7 +968,7 @@ router.get('/guests', async (req, res, next) => {
   }
 });
 
-router.post('/guests', async (req, res, next) => {
+router.post('/guests', requireRole(...RECEPTION_ROLES), async (req, res, next) => {
   try {
     const newGuest = {
       id: `guest-${Date.now()}`,
@@ -971,7 +985,7 @@ router.post('/guests', async (req, res, next) => {
   }
 });
 
-router.put('/guests/:id', async (req, res, next) => {
+router.put('/guests/:id', requireRole(...RECEPTION_ROLES), async (req, res, next) => {
   try {
     const { id } = req.params;
     const updated = await db.update('guests', id, req.body);
@@ -1008,9 +1022,9 @@ router.get('/reservations', async (req, res, next) => {
   }
 });
 
-router.post('/reservations', async (req, res, next) => {
+router.post('/reservations', requireRole(...RECEPTION_ROLES), async (req, res, next) => {
   try {
-    const { guest_id, room_id, arrival_date, departure_date, room_rate } = req.body;
+    const { guest_id, room_id, arrival_date, departure_date, booking_source_id, adults, children, discount, deposit, remarks } = req.body;
     if (!guest_id || !room_id || !arrival_date || !departure_date) {
       return res.status(400).json({ success: false, error: { message: 'Champs obligatoires manquants.' } });
     }
@@ -1031,24 +1045,45 @@ router.post('/reservations', async (req, res, next) => {
       return res.status(400).json({ success: false, error: { message: 'La chambre sélectionnée est invalide ou introuvable.' } });
     }
 
+    const guests = await db.getCollection('guests');
+    if (!guests.some((g: any) => g.id === guest_id)) {
+      return res.status(400).json({ success: false, error: { message: 'Le client sélectionné est invalide ou introuvable.' } });
+    }
+
+    // A new reservation must not overlap an existing active one for the same room.
+    const existingReservations = await db.getCollection('reservations');
+    if (hasOverlappingReservation(existingReservations, room_id, arrDate, depDate)) {
+      return res.status(409).json({
+        success: false,
+        error: { message: 'Cette chambre est déjà réservée sur tout ou partie de cette période.', code: 'ROOM_ALREADY_BOOKED' }
+      });
+    }
+
+    // Pricing is computed server-side only. The room rate always comes from the
+    // room catalog (never from the client payload), so a caller cannot fabricate
+    // an arbitrary total_amount/balance/status by sending extra fields.
+    const nights = computeNights(arrDate, depDate);
+    const pricing = computeReservationPricing({ basePrice: validRoom.base_price, nights, discount, deposit });
+
     const newRes = {
       id: `res-${Date.now()}`,
       reservation_number: `RES-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+      guest_id,
+      room_id,
+      booking_source_id: booking_source_id || null,
       status: 'Confirmée',
-      adults: 1,
-      children: 0,
-      discount: 0,
-      tax_amount: 0,
-      deposit: 0,
-      balance: Number(room_rate || 35000),
-      total_amount: Number(room_rate || 35000),
-      ...req.body,
+      arrival_date,
+      departure_date,
+      adults: Number(adults) > 0 ? Number(adults) : 1,
+      children: Number(children) >= 0 ? Number(children) : 0,
+      ...pricing,
+      remarks: typeof remarks === 'string' ? remarks : '',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
 
     const inserted = await db.insert('reservations', newRes);
-    
+
     // Auto update room status to reserved
     await db.update('rooms', room_id, { current_status: 'Réservée' });
 
@@ -1058,7 +1093,7 @@ router.post('/reservations', async (req, res, next) => {
   }
 });
 
-router.post('/reservations/:id/check-in', async (req, res, next) => {
+router.post('/reservations/:id/check-in', requireRole(...RECEPTION_ROLES), async (req, res, next) => {
   try {
     const { id } = req.params;
     const reservation = await db.getById('reservations', id);
@@ -1106,7 +1141,7 @@ router.get('/finance/invoices/:id', async (req, res, next) => {
   }
 });
 
-router.post('/finance/payments', async (req: AuthenticatedRequest, res, next) => {
+router.post('/finance/payments', requireRole(...RECEPTION_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const newPayment = {
       id: `pay-${Date.now()}`,
@@ -1136,7 +1171,7 @@ router.get('/hrms/employees', async (req, res, next) => {
   }
 });
 
-router.post('/hrms/employees', async (req: AuthenticatedRequest, res, next) => {
+router.post('/hrms/employees', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const employees = await db.getCollection('hrms_employees');
     const newEmployee = {
@@ -1168,7 +1203,7 @@ router.post('/hrms/employees', async (req: AuthenticatedRequest, res, next) => {
   }
 });
 
-router.put('/hrms/employees/:id', async (req, res, next) => {
+router.put('/hrms/employees/:id', requireRole(...ADMIN_ROLES), async (req, res, next) => {
   try {
     const { id } = req.params;
     const updated = await db.update('hrms_employees', id, req.body);
@@ -1191,7 +1226,7 @@ router.get('/hrms/departments', async (req, res, next) => {
   }
 });
 
-router.post('/hrms/departments', async (req, res, next) => {
+router.post('/hrms/departments', requireRole(...ADMIN_ROLES), async (req, res, next) => {
   try {
     const newDept = {
       id: `dept-${Date.now()}`,
@@ -1216,7 +1251,7 @@ router.get('/hrms/jobs', async (req, res, next) => {
   }
 });
 
-router.post('/hrms/jobs', async (req, res, next) => {
+router.post('/hrms/jobs', requireRole(...ADMIN_ROLES), async (req, res, next) => {
   try {
     const newJob = {
       id: `job-${Date.now()}`,
@@ -1241,7 +1276,7 @@ router.get('/hrms/teams', async (req, res, next) => {
   }
 });
 
-router.post('/hrms/teams', async (req, res, next) => {
+router.post('/hrms/teams', requireRole(...ADMIN_ROLES), async (req, res, next) => {
   try {
     const newTeam = {
       id: `team-${Date.now()}`,
@@ -1266,7 +1301,7 @@ router.get('/hrms/contracts', async (req, res, next) => {
   }
 });
 
-router.post('/hrms/contracts', async (req, res, next) => {
+router.post('/hrms/contracts', requireRole(...ADMIN_ROLES), async (req, res, next) => {
   try {
     const newContract = {
       id: `contract-${Date.now()}`,
@@ -1285,7 +1320,7 @@ router.post('/hrms/contracts', async (req, res, next) => {
   }
 });
 
-router.put('/hrms/contracts/:id', async (req, res, next) => {
+router.put('/hrms/contracts/:id', requireRole(...ADMIN_ROLES), async (req, res, next) => {
   try {
     const { id } = req.params;
     const updated = await db.update('hrms_contracts', id, req.body);
@@ -1308,7 +1343,7 @@ router.get('/hrms/onboarding-tasks', async (req, res, next) => {
   }
 });
 
-router.put('/hrms/onboarding-tasks/:id', async (req, res, next) => {
+router.put('/hrms/onboarding-tasks/:id', requireRole(...ADMIN_ROLES), async (req, res, next) => {
   try {
     const { id } = req.params;
     const updated = await db.update('hrms_onboarding_tasks', id, req.body);
@@ -1373,7 +1408,7 @@ router.get('/room_categories', async (req, res, next) => {
   }
 });
 
-router.put('/room_categories', async (req, res, next) => {
+router.put('/room_categories', requireRole(...ADMIN_ROLES), async (req, res, next) => {
   try {
     const { categories } = req.body;
     if (!categories || !Array.isArray(categories)) {
@@ -1386,7 +1421,7 @@ router.put('/room_categories', async (req, res, next) => {
   }
 });
 
-router.put('/settings/hotel', async (req, res, next) => {
+router.put('/settings/hotel', requireRole(...ADMIN_ROLES), async (req, res, next) => {
   try {
     const settingsList = await db.getCollection('hotel_settings');
     const existing = settingsList[0] || { id: 1 };
