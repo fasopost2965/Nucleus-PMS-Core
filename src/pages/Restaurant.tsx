@@ -3,15 +3,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Utensils, Plus, Check, Clock, Search, Coffee, CheckSquare, Coins, X } from 'lucide-react';
 import { PageHeader, Badge, AlertBanner, StatCard } from '../components/ui/pms-ui';
-import { mockMenuItems, mockRestaurantOrders, mockRestaurantOrderItems } from '../mockData';
-import { IMenuItem, IRestaurantOrder } from '../types';
+import { IMenuItem, IRestaurantOrder, IRoom } from '../types';
+import { api } from '../utils/api';
 
 export default function Restaurant() {
-  const [menus, setMenus] = useState<IMenuItem[]>(mockMenuItems);
-  const [orders, setOrders] = useState<IRestaurantOrder[]>(mockRestaurantOrders);
+  // Menu items and orders are the real data, loaded from the API. Kitchen
+  // tickets still display a fixed per-order dish preview below (there is no
+  // order-line-items table in schema.sql to source a real breakdown from) —
+  // only each order's status and totals are genuine.
+  const [menus, setMenus] = useState<IMenuItem[]>([]);
+  const [orders, setOrders] = useState<IRestaurantOrder[]>([]);
+  const [rooms, setRooms] = useState<IRoom[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [showAddMenu, setShowAddMenu] = useState(false);
 
@@ -21,36 +28,74 @@ export default function Restaurant() {
   const [newPrice, setNewPrice] = useState(5000);
   const [newDesc, setNewDesc] = useState('');
 
-  const handleAddMenu = (e: React.FormEvent) => {
+  const loadData = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const [menuData, orderData, roomsData] = await Promise.all([
+        api.getMenuItems(),
+        api.getRestaurantOrders(),
+        api.getRooms()
+      ]);
+      setMenus(menuData);
+      setOrders(orderData);
+      setRooms(roomsData);
+      setErrorMsg('');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Impossible de charger les données du restaurant.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const handleAddMenu = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) return;
 
-    const newItem: IMenuItem = {
-      id: `menu-${Date.now()}`,
-      category_id: newCat,
-      name: newName,
-      description: newDesc,
-      selling_price: newPrice,
-      tax_rate: 18,
-      available: true
-    };
-
-    setMenus([...menus, newItem]);
-    setShowAddMenu(false);
-    setNewName('');
-    setNewDesc('');
-    setSuccessMsg(`Le produit "${newItem.name}" a été ajouté au menu.`);
-    setTimeout(() => setSuccessMsg(''), 4000);
+    try {
+      await api.createMenuItem({
+        category_id: newCat,
+        name: newName,
+        description: newDesc,
+        selling_price: newPrice
+      });
+      setShowAddMenu(false);
+      setNewName('');
+      setNewDesc('');
+      setErrorMsg('');
+      setSuccessMsg(`Le produit "${newName}" a été ajouté au menu.`);
+      setTimeout(() => setSuccessMsg(''), 4000);
+      await loadData();
+    } catch (err: any) {
+      setErrorMsg(err.message || "Échec de l'ajout de l'article au menu.");
+    }
   };
 
-  const updateOrderStatus = (id: string, newStatus: 'En préparation' | 'Servie' | 'Facturée' | 'Annulée') => {
-    setOrders(orders.map(o => o.id === id ? { ...o, status: newStatus } : o));
-    setSuccessMsg(`Commande mise à jour : ${newStatus}`);
-    setTimeout(() => setSuccessMsg(''), 4000);
+  const updateOrderStatus = async (id: string, newStatus: 'En préparation' | 'Servie' | 'Facturée' | 'Annulée') => {
+    try {
+      await api.updateRestaurantOrderStatus(id, newStatus);
+      setErrorMsg('');
+      setSuccessMsg(`Commande mise à jour : ${newStatus}`);
+      setTimeout(() => setSuccessMsg(''), 4000);
+      await loadData();
+    } catch (err: any) {
+      setErrorMsg(err.message || "Échec de la mise à jour de la commande.");
+    }
   };
 
-  const toggleMenuAvailability = (id: string) => {
-    setMenus(menus.map(m => m.id === id ? { ...m, available: !m.available } : m));
+  const toggleMenuAvailability = async (id: string) => {
+    const item = menus.find(m => m.id === id);
+    if (!item) return;
+    try {
+      await api.updateMenuItem(id, { available: !item.available });
+      setErrorMsg('');
+      await loadData();
+    } catch (err: any) {
+      setErrorMsg(err.message || "Échec de la mise à jour de la disponibilité.");
+    }
   };
 
   return (
@@ -66,8 +111,14 @@ export default function Restaurant() {
       />
 
       <div className="p-6 lg:p-8 space-y-6 flex-1 overflow-y-auto">
+        {errorMsg && (
+          <AlertBanner text={errorMsg} type="error" />
+        )}
         {successMsg && (
           <AlertBanner text={successMsg} type="success" />
+        )}
+        {isLoading && (
+          <AlertBanner text="Chargement du menu et des commandes..." type="info" />
         )}
 
         {/* STATS ROW */}
@@ -77,8 +128,10 @@ export default function Restaurant() {
             <span className="text-2xl font-extrabold text-brand-orange block mt-1">{orders.filter(o => o.status !== 'Facturée' && o.status !== 'Annulée').length}</span>
           </div>
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs text-left">
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Chiffre d'affaires Resto (Jour)</span>
-            <span className="text-2xl font-extrabold text-slate-700 block mt-1">48 000 FCFA</span>
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Chiffre d'affaires Resto (Commandes facturées)</span>
+            <span className="text-2xl font-extrabold text-slate-700 block mt-1">
+              {orders.filter(o => o.status === 'Facturée').reduce((sum, o) => sum + o.total, 0).toLocaleString()} XOF
+            </span>
           </div>
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs text-left">
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Articles au Menu</span>
@@ -144,23 +197,16 @@ export default function Restaurant() {
                   </div>
 
                   <div className="text-[11px] text-slate-600 font-medium space-y-0.5">
-                    {o.id === 'ord-1' ? (
-                      <>
-                        <p>• 2x Kédjénou de Poulet de Bouaké</p>
-                        <p>• 1x Allocos Dorés</p>
-                      </>
-                    ) : o.id === 'ord-2' ? (
-                      <>
-                        <p>• 2x Le Grand Brunch Bouaké</p>
-                        <p>• 1x Jus de Bissap Maison</p>
-                      </>
-                    ) : (
-                      <p>• 1x Le Grand Brunch Bouaké</p>
-                    )}
+                    {/* No order-line-items table exists yet (see schema.sql),
+                        so the dish-by-dish breakdown isn't available here —
+                        only the order's real status and total below are. */}
+                    <p className="italic text-slate-400">Détail des articles non disponible</p>
                   </div>
 
                   <div className="flex justify-between items-baseline pt-1">
-                    <span className="text-[10px] text-slate-400 font-bold">Chambre : {o.room_id ? '202' : 'Client Ext.'}</span>
+                    <span className="text-[10px] text-slate-400 font-bold">
+                      Chambre : {o.room_id ? (rooms.find(r => r.id === o.room_id)?.room_number || o.room_id) : 'Client Ext.'}
+                    </span>
                     <span className="text-xs font-black text-brand-orange">{o.total.toLocaleString()} XOF</span>
                   </div>
 

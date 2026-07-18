@@ -130,6 +130,21 @@ export const api = {
   },
   updateStockItems: (items: any[]) => request('/stock-items', { method: 'PUT', body: JSON.stringify({ items }) }),
 
+  // Restaurant API
+  getMenuItems: async (): Promise<any[]> => {
+    const res = await request('/restaurant/menu-items');
+    return res.menuItems || [];
+  },
+  createMenuItem: (data: any) => request('/restaurant/menu-items', { method: 'POST', body: JSON.stringify(data) }),
+  updateMenuItem: (id: string, data: any) => request(`/restaurant/menu-items/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  getRestaurantOrders: async (): Promise<any[]> => {
+    const res = await request('/restaurant/orders');
+    return res.orders || [];
+  },
+  updateRestaurantOrderStatus: (id: string, status: string) =>
+    request(`/restaurant/orders/${id}`, { method: 'PUT', body: JSON.stringify({ status }) }),
+
   // Guests API
   getGuests: async (): Promise<any[]> => {
     const res = await request('/guests');

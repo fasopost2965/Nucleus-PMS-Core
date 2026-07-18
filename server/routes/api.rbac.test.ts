@@ -41,6 +41,9 @@ const cases: Case[] = [
   { method: 'post', path: '/api/finance/invoices/inv-1/pay', deniedRole: 'Housekeeping', label: 'pay invoice' },
   { method: 'put', path: '/api/housekeeping-tasks/task-1', deniedRole: 'Magasinier / Stock', label: 'update housekeeping task status' },
   { method: 'put', path: '/api/stock-items', deniedRole: 'Directeur', label: 'update stock items (Directeur is read-only on Stocks)' },
+  { method: 'post', path: '/api/restaurant/menu-items', deniedRole: 'Réceptionniste', label: 'create menu item' },
+  { method: 'put', path: '/api/restaurant/menu-items/menu-1', deniedRole: 'Réceptionniste', label: 'update menu item' },
+  { method: 'put', path: '/api/restaurant/orders/ord-1', deniedRole: 'Housekeeping', label: 'update restaurant order status' },
   { method: 'post', path: '/api/hrms/employees', deniedRole: 'Réceptionniste', label: 'create HR employee' },
   { method: 'put', path: '/api/hrms/employees/emp-1', deniedRole: 'Réceptionniste', label: 'update HR employee' },
   { method: 'post', path: '/api/hrms/departments', deniedRole: 'Réceptionniste', label: 'create HR department' },
@@ -133,6 +136,28 @@ describe('RBAC enforcement on write endpoints (server/routes/api.ts)', () => {
       .put('/api/stock-items')
       .set('Authorization', `Bearer ${tokenFor('Magasinier / Stock')}`)
       .send({});
+
+    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(400);
+  });
+
+  it('lets an allowed role (Super Administrateur) past the RBAC gate on POST /api/restaurant/menu-items', async () => {
+    // Missing required fields: rejected before any DB access.
+    const res = await request(app)
+      .post('/api/restaurant/menu-items')
+      .set('Authorization', `Bearer ${tokenFor('Super Administrateur')}`)
+      .send({});
+
+    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(400);
+  });
+
+  it('lets an allowed role (Réceptionniste) past the RBAC gate on PUT /api/restaurant/orders/:id', async () => {
+    // Invalid status: rejected before any DB access.
+    const res = await request(app)
+      .put('/api/restaurant/orders/ord-1')
+      .set('Authorization', `Bearer ${tokenFor('Réceptionniste')}`)
+      .send({ status: 'Not A Real Status' });
 
     expect(res.status).not.toBe(403);
     expect(res.status).toBe(400);

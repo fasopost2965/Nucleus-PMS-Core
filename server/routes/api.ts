@@ -1645,7 +1645,87 @@ router.put('/stock-items', requireRole(...STOCK_WRITE_ROLES), async (req: Authen
 });
 
 // ==========================================
-// 10. HOTEL SETTINGS ENDPOINTS
+// 10. RESTAURANT ENDPOINTS
+// ==========================================
+// Menu items map directly onto restaurant_menu_items. Orders map onto
+// restaurant_orders for status transitions and totals, but there is no
+// order-line-items table in schema.sql, so an order's individual dish
+// breakdown remains whatever Restaurant.tsx already displays locally —
+// only the order's status/totals are real here.
+
+router.get('/restaurant/menu-items', async (req, res, next) => {
+  try {
+    const menuItems = await db.getCollection('restaurant_menu_items');
+    return res.status(200).json({ success: true, menuItems });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/restaurant/menu-items', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { name, category_id, selling_price } = req.body;
+    if (!name || !category_id || selling_price === undefined) {
+      return res.status(400).json({ success: false, error: { message: 'Nom, catégorie et prix de vente sont requis.' } });
+    }
+    const newItem = {
+      id: `menu-${Date.now()}`,
+      tax_rate: 18,
+      available: true,
+      ...req.body
+    };
+    const inserted = await db.insert('restaurant_menu_items', newItem);
+    await logActivity(req.user?.id || 1, 'restaurant', 'create_menu_item', inserted.id, `Ajout de "${inserted.name}" à la carte`);
+    return res.status(201).json({ success: true, menuItem: inserted });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/restaurant/menu-items/:id', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    const updated = await db.update('restaurant_menu_items', id, req.body);
+    if (!updated) {
+      return res.status(404).json({ success: false, error: { message: 'Article de menu introuvable.' } });
+    }
+    await logActivity(req.user?.id || 1, 'restaurant', 'update_menu_item', id, `Mise à jour de l'article de menu "${updated.name}"`);
+    return res.status(200).json({ success: true, menuItem: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/restaurant/orders', async (req, res, next) => {
+  try {
+    const orders = await db.getCollection('restaurant_orders');
+    return res.status(200).json({ success: true, orders });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/restaurant/orders/:id', requireRole(...RECEPTION_ROLES), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const allowedStatuses = ['En attente', 'En préparation', 'Servie', 'Facturée', 'Annulée'];
+    if (!status || !allowedStatuses.includes(status)) {
+      return res.status(400).json({ success: false, error: { message: 'Statut de commande invalide.' } });
+    }
+    const updated = await db.update('restaurant_orders', id, { status });
+    if (!updated) {
+      return res.status(404).json({ success: false, error: { message: 'Commande introuvable.' } });
+    }
+    await logActivity(req.user?.id || 1, 'restaurant', 'update_order_status', id, `Commande ${updated.order_number} passée au statut "${status}"`);
+    return res.status(200).json({ success: true, order: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ==========================================
+// 11. HOTEL SETTINGS ENDPOINTS
 // ==========================================
 router.get('/room_categories', async (req, res, next) => {
   try {
@@ -1685,7 +1765,7 @@ router.put('/settings/hotel', requireRole(...ADMIN_ROLES), async (req: Authentic
 });
 
 // ==========================================
-// 11. SYSTEM MAINTENANCE ENDPOINTS (PURGE & SEED)
+// 12. SYSTEM MAINTENANCE ENDPOINTS (PURGE & SEED)
 // ==========================================
 import { getInitialSeedData, writeDB, readDB } from '../config/db';
 
@@ -1747,7 +1827,7 @@ router.post('/system/purge', requireRole(...ADMIN_ROLES), async (req: Authentica
 
 
 // ==========================================
-// 12. SYSTEM SYNCHRONIZATION ENDPOINTS
+// 13. SYSTEM SYNCHRONIZATION ENDPOINTS
 // ==========================================
 
 const nameMap: Record<string, string> = {
