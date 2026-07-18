@@ -141,11 +141,12 @@ router.post('/auth/forgot-password', async (req, res, next) => {
       reset_code_expires: expiry
     });
 
-    // We send back the code in dev mode so the client can simulate/enter it immediately
+    // The reset code is only echoed back outside production, for local testing.
+    // In production it must be delivered out-of-band (email/SMS) — never in the API response.
     return res.status(200).json({
       success: true,
       message: 'Un code de réinitialisation vous a été généré.',
-      devCode: resetCode
+      ...(process.env.NODE_ENV !== 'production' ? { devCode: resetCode } : {})
     });
   } catch (err) {
     next(err);
