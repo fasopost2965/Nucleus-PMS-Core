@@ -1,5 +1,8 @@
 import express from 'express';
 import path from 'path';
+import helmet from 'helmet';
+import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 import { createServer as createViteServer } from 'vite';
 import apiRouter from './server/routes/api';
 import { errorHandler } from './server/middlewares/errorHandler';
@@ -8,7 +11,30 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  const PROD_ORIGIN = process.env.APP_URL || 'https://pms.brunchbouake.com';
+  const allowedOrigins = process.env.NODE_ENV === 'production'
+    ? [PROD_ORIGIN]
+    : [PROD_ORIGIN, 'http://localhost:3000', 'http://localhost:5173'];
+
   // 1. Core Parsers & Middlewares
+  app.use(helmet());
+  app.use(cors({
+    origin: allowedOrigins,
+    credentials: true
+  }));
+
+  const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+      success: false,
+      error: { message: 'Trop de tentatives de connexion. Réessayez plus tard.', code: 'TOO_MANY_REQUESTS' }
+    }
+  });
+  app.use('/api/auth/login', loginLimiter);
+
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
