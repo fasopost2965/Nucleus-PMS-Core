@@ -3,31 +3,47 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Sparkles, CheckSquare, Search, Filter, RefreshCw, CheckCircle2, User, HelpCircle } from 'lucide-react';
 import { PageHeader, Badge, AlertBanner } from '../components/ui/pms-ui';
-import { mockHousekeepingTasks, mockRooms, mockStockItems } from '../mockData';
-import { IHousekeepingTask, THousekeepingStatus } from '../types';
+import { mockStockItems } from '../mockData';
+import { IHousekeepingTask, IRoom, THousekeepingStatus } from '../types';
+import { api } from '../utils/api';
 import { logManualStockMovement } from '../stockService';
 
 export default function Housekeeping() {
-  const [tasks, setTasks] = useState<IHousekeepingTask[]>(() => {
-    const stored = localStorage.getItem('pms_housekeeping_tasks');
-    if (stored) {
-      try { return JSON.parse(stored); } catch (e) {}
-    }
-    return mockHousekeepingTasks;
-  });
-
-  const [rooms, setRooms] = useState(() => {
-    const stored = localStorage.getItem('pms_rooms');
-    if (stored) {
-      try { return JSON.parse(stored); } catch (e) {}
-    }
-    return mockRooms;
-  });
+  // Tasks and rooms are the real operational data, loaded from the API.
+  // The linen/stock movement triggered on validation (triggerLinenMovement
+  // below) still writes to localStorage: the Stock module itself has no
+  // backend of its own yet (no API routes exist for stock_items), so there
+  // is nothing real to wire that call to without building Stock first.
+  const [tasks, setTasks] = useState<IHousekeepingTask[]>([]);
+  const [rooms, setRooms] = useState<IRoom[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState('');
 
   const [successMsg, setSuccessMsg] = useState('');
+
+  const loadData = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const [tasksData, roomsData] = await Promise.all([
+        api.getHousekeepingTasks(),
+        api.getRooms()
+      ]);
+      setTasks(tasksData);
+      setRooms(roomsData);
+      setErrorMsg('');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Impossible de charger les données de ménage.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const triggerLinenMovement = (roomId: string) => {
     const targetRoom = rooms.find(r => r.id === roomId);
@@ -113,19 +129,14 @@ export default function Housekeeping() {
     setTimeout(() => setSuccessMsg(''), 6000);
   };
 
-  const updateTaskStatus = (id: string, newStatus: THousekeepingStatus) => {
-    const updatedTasks = tasks.map(t => {
-      if (t.id === id) {
-        return {
-          ...t,
-          status: newStatus,
-          completed_time: newStatus === 'Disponible' ? new Date().toISOString().replace('T', ' ').substring(0, 16) : t.completed_time
-        };
-      }
-      return t;
-    });
-    setTasks(updatedTasks);
-    localStorage.setItem('pms_housekeeping_tasks', JSON.stringify(updatedTasks));
+  const updateTaskStatus = async (id: string, newStatus: THousekeepingStatus) => {
+    try {
+      await api.updateHousekeepingTaskStatus(id, newStatus);
+      setErrorMsg('');
+      await loadData();
+    } catch (err: any) {
+      setErrorMsg(err.message || "Échec de la mise à jour du statut de la tâche.");
+    }
   };
 
   const getRoomNum = (roomId: string) => {
@@ -140,8 +151,14 @@ export default function Housekeeping() {
       />
 
       <div className="p-6 lg:p-8 space-y-6 flex-1 overflow-y-auto">
+        {errorMsg && (
+          <AlertBanner text={errorMsg} type="error" />
+        )}
         {successMsg && (
           <AlertBanner text={successMsg} type="success" />
+        )}
+        {isLoading && (
+          <AlertBanner text="Chargement des tâches de ménage..." type="info" />
         )}
 
         {/* SUMMARY PROGRESS BAR */}
@@ -151,12 +168,12 @@ export default function Housekeeping() {
             <div className="space-y-2">
               <div className="flex justify-between text-xs font-bold text-slate-700">
                 <span>Propre & Prête : {rooms.filter(r => r.housekeeping_status === 'Disponible').length} / {rooms.length}</span>
-                <span>{Math.round((rooms.filter(r => r.housekeeping_status === 'Disponible').length / rooms.length) * 100)}%</span>
+                <span>{rooms.length > 0 ? Math.round((rooms.filter(r => r.housekeeping_status === 'Disponible').length / rooms.length) * 100) : 0}%</span>
               </div>
               <div className="w-full bg-slate-100 rounded-full h-2">
-                <div 
+                <div
                   className="bg-emerald-500 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${(rooms.filter(r => r.housekeeping_status === 'Disponible').length / rooms.length) * 100}%` }}
+                  style={{ width: `${rooms.length > 0 ? (rooms.filter(r => r.housekeeping_status === 'Disponible').length / rooms.length) * 100 : 0}%` }}
                 ></div>
               </div>
             </div>
@@ -228,12 +245,13 @@ export default function Housekeeping() {
                       )}
                       {task.status === 'Contrôle' && (
                         <button
-                          onClick={() => {
-                            updateTaskStatus(task.id, 'Disponible');
-                            // Sync rooms state & save to localstorage
-                            const updatedRooms = rooms.map(r => r.id === task.room_id ? { ...r, housekeeping_status: 'Disponible' } : r);
-                            setRooms(updatedRooms);
-                            localStorage.setItem('pms_rooms', JSON.stringify(updatedRooms));
+                          onClick={async () => {
+                            // updateTaskStatus persists the task + room
+                            // housekeeping_status atomically server-side and
+                            // reloads fresh data; the linen/stock movement
+                            // below is a separate, still-local simulation
+                            // (see the note on the Stock module above).
+                            await updateTaskStatus(task.id, 'Disponible');
                             triggerLinenMovement(task.room_id);
                           }}
                           className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-[10px] px-2.5 py-1 rounded cursor-pointer"

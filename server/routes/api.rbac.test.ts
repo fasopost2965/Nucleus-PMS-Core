@@ -39,6 +39,7 @@ const cases: Case[] = [
   { method: 'post', path: '/api/reservations/res-1/check-out', deniedRole: 'Housekeeping', label: 'check-out' },
   { method: 'post', path: '/api/finance/payments', deniedRole: 'Housekeeping', label: 'record payment' },
   { method: 'post', path: '/api/finance/invoices/inv-1/pay', deniedRole: 'Housekeeping', label: 'pay invoice' },
+  { method: 'put', path: '/api/housekeeping-tasks/task-1', deniedRole: 'Magasinier / Stock', label: 'update housekeeping task status' },
   { method: 'post', path: '/api/hrms/employees', deniedRole: 'Réceptionniste', label: 'create HR employee' },
   { method: 'put', path: '/api/hrms/employees/emp-1', deniedRole: 'Réceptionniste', label: 'update HR employee' },
   { method: 'post', path: '/api/hrms/departments', deniedRole: 'Réceptionniste', label: 'create HR department' },
@@ -110,6 +111,18 @@ describe('RBAC enforcement on write endpoints (server/routes/api.ts)', () => {
 
     expect(res.status).not.toBe(403);
     expect(res.status).toBe(404);
+  });
+
+  it('lets an allowed role (Housekeeping) past the RBAC gate on PUT /api/housekeeping-tasks/:id', async () => {
+    // Invalid status: validated before any DB access, so this proves the
+    // role check passed without ever touching the database.
+    const res = await request(app)
+      .put('/api/housekeeping-tasks/task-1')
+      .set('Authorization', `Bearer ${tokenFor('Housekeeping')}`)
+      .send({ status: 'Not A Real Status' });
+
+    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(400);
   });
 
   it('lets an allowed role (Réceptionniste) past the RBAC gate on POST /api/reservations', async () => {

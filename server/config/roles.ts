@@ -8,6 +8,10 @@ export const ADMIN_ROLES = ['Super Administrateur', 'Directeur'];
 // but no access to the room catalog, HR data or hotel-wide settings.
 export const RECEPTION_ROLES = [...ADMIN_ROLES, 'Réceptionniste'];
 
+// Housekeeping: Réception has "Write" (report room status), Housekeeping has
+// "CRUD" (owns the cleaning task lifecycle), per the permission matrix.
+export const HOUSEKEEPING_ROLES = [...ADMIN_ROLES, 'Réceptionniste', 'Housekeeping'];
+
 // Fail-closed fallback for user records with no assigned role. Deliberately
 // matches no entry in ADMIN_ROLES/RECEPTION_ROLES/DEFAULT_ROLE_PRIVILEGES so
 // such an account gets dashboard-only access instead of being silently

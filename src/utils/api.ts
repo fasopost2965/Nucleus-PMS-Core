@@ -115,6 +115,14 @@ export const api = {
   },
   updateRoomCategories: (categories: any[]) => request('/room_categories', { method: 'PUT', body: JSON.stringify({ categories }) }),
 
+  // Housekeeping API
+  getHousekeepingTasks: async (): Promise<any[]> => {
+    const res = await request('/housekeeping-tasks');
+    return res.tasks || [];
+  },
+  updateHousekeepingTaskStatus: (id: string, status: string) =>
+    request(`/housekeeping-tasks/${id}`, { method: 'PUT', body: JSON.stringify({ status }) }),
+
   // Guests API
   getGuests: async (): Promise<any[]> => {
     const res = await request('/guests');

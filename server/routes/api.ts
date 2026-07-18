@@ -4,7 +4,7 @@ import { db } from '../config/db';
 import { generateToken } from '../config/jwt';
 import { authMiddleware, AuthenticatedRequest } from '../middlewares/authMiddleware';
 import { requireRole } from '../middlewares/roleMiddleware';
-import { ADMIN_ROLES, RECEPTION_ROLES, resolveRole } from '../config/roles';
+import { ADMIN_ROLES, RECEPTION_ROLES, HOUSEKEEPING_ROLES, resolveRole } from '../config/roles';
 import { hasOverlappingReservation, computeNights, computeReservationPricing } from '../services/reservationPricing';
 import { sendPasswordResetEmail } from '../services/mailer';
 
@@ -1563,7 +1563,57 @@ router.get('/hrms/business-events', async (req, res, next) => {
 });
 
 // ==========================================
-// 8. HOTEL SETTINGS ENDPOINTS
+// 8. HOUSEKEEPING ENDPOINTS
+// ==========================================
+
+router.get('/housekeeping-tasks', async (req, res, next) => {
+  try {
+    const tasks = await db.getCollection('housekeeping_tasks');
+    return res.status(200).json({ success: true, tasks });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/housekeeping-tasks/:id', requireRole(...HOUSEKEEPING_ROLES), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const allowedStatuses = ['À nettoyer', 'En cours', 'Contrôle', 'Disponible'];
+    if (!status || !allowedStatuses.includes(status)) {
+      return res.status(400).json({ success: false, error: { message: 'Statut de tâche invalide.' } });
+    }
+
+    const task = await db.getById('housekeeping_tasks', id);
+    if (!task) {
+      return res.status(404).json({ success: false, error: { message: 'Tâche de ménage introuvable.' } });
+    }
+
+    const taskFields: Record<string, any> = { status };
+    if (status === 'Disponible') {
+      taskFields.completed_time = new Date().toISOString();
+    }
+
+    // A room only becomes bookable again the instant its cleaning task is
+    // validated — the task and room status must land together, never one
+    // without the other.
+    const results = await db.runTransaction([
+      { type: 'update', collection: 'housekeeping_tasks', id, fields: taskFields },
+      { type: 'update', collection: 'rooms', id: task.room_id, fields: { housekeeping_status: status } }
+    ]);
+    if (!results) {
+      return res.status(404).json({ success: false, error: { message: 'Tâche ou chambre associée introuvable.' } });
+    }
+
+    await logActivity(req.user?.id || 1, 'housekeeping', 'update_task_status', id, `Tâche de ménage ${id} passée au statut "${status}"`);
+    return res.status(200).json({ success: true, task: results[0], room: results[1] });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ==========================================
+// 9. HOTEL SETTINGS ENDPOINTS
 // ==========================================
 router.get('/room_categories', async (req, res, next) => {
   try {
@@ -1603,7 +1653,7 @@ router.put('/settings/hotel', requireRole(...ADMIN_ROLES), async (req: Authentic
 });
 
 // ==========================================
-// 9. SYSTEM MAINTENANCE ENDPOINTS (PURGE & SEED)
+// 10. SYSTEM MAINTENANCE ENDPOINTS (PURGE & SEED)
 // ==========================================
 import { getInitialSeedData, writeDB, readDB } from '../config/db';
 
@@ -1665,7 +1715,7 @@ router.post('/system/purge', requireRole(...ADMIN_ROLES), async (req: Authentica
 
 
 // ==========================================
-// 10. SYSTEM SYNCHRONIZATION ENDPOINTS
+// 11. SYSTEM SYNCHRONIZATION ENDPOINTS
 // ==========================================
 
 const nameMap: Record<string, string> = {
