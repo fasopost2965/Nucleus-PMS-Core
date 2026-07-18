@@ -3,6 +3,9 @@ import bcrypt from 'bcryptjs';
 import { db } from '../config/db';
 import { generateToken } from '../config/jwt';
 import { authMiddleware, AuthenticatedRequest } from '../middlewares/authMiddleware';
+import { requireRole } from '../middlewares/roleMiddleware';
+
+const ADMIN_ROLES = ['Super Administrateur', 'Directeur'];
 
 const router = Router();
 
@@ -618,7 +621,7 @@ router.get('/hrms/business-events', async (req, res, next) => {
 // ==========================================
 import { getInitialSeedData, writeDB, readDB } from '../config/db';
 
-router.post('/system/purge', async (req, res, next) => {
+router.post('/system/purge', requireRole(...ADMIN_ROLES), async (req, res, next) => {
   try {
     const currentData = readDB();
     
@@ -661,7 +664,7 @@ router.post('/system/purge', async (req, res, next) => {
   }
 });
 
-router.post('/system/seed', async (req, res, next) => {
+router.post('/system/seed', requireRole(...ADMIN_ROLES), async (req, res, next) => {
   try {
     // Reset back to standard mock/seed data
     writeDB(getInitialSeedData());
