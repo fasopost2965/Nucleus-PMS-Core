@@ -6,6 +6,7 @@ import { authMiddleware, AuthenticatedRequest } from '../middlewares/authMiddlew
 import { requireRole } from '../middlewares/roleMiddleware';
 import { ADMIN_ROLES, RECEPTION_ROLES, resolveRole } from '../config/roles';
 import { hasOverlappingReservation, computeNights, computeReservationPricing } from '../services/reservationPricing';
+import { sendPasswordResetEmail } from '../services/mailer';
 
 const router = Router();
 
@@ -147,8 +148,15 @@ router.post('/auth/forgot-password', async (req, res, next) => {
       reset_code_expires: expiry
     });
 
+    const hotelSettings = await db.getCollection('hotel_settings');
+    const hotelName = hotelSettings[0]?.hotel_name || 'Nucleus PMS';
+    const emailResult = await sendPasswordResetEmail(user.email, resetCode, hotelName);
+    if (!emailResult.sent) {
+      console.warn(`[Auth] Code de réinitialisation généré pour ${user.email} mais l'email n'a pas pu être envoyé (${emailResult.reason}).`);
+    }
+
     // The reset code is only echoed back outside production, for local testing.
-    // In production it must be delivered out-of-band (email/SMS) — never in the API response.
+    // In production it must be delivered by email — never in the API response.
     return res.status(200).json({
       success: true,
       message: genericMessage,
