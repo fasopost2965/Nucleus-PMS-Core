@@ -40,6 +40,7 @@ const cases: Case[] = [
   { method: 'post', path: '/api/finance/payments', deniedRole: 'Housekeeping', label: 'record payment' },
   { method: 'post', path: '/api/finance/invoices/inv-1/pay', deniedRole: 'Housekeeping', label: 'pay invoice' },
   { method: 'put', path: '/api/housekeeping-tasks/task-1', deniedRole: 'Magasinier / Stock', label: 'update housekeeping task status' },
+  { method: 'put', path: '/api/stock-items', deniedRole: 'Directeur', label: 'update stock items (Directeur is read-only on Stocks)' },
   { method: 'post', path: '/api/hrms/employees', deniedRole: 'Réceptionniste', label: 'create HR employee' },
   { method: 'put', path: '/api/hrms/employees/emp-1', deniedRole: 'Réceptionniste', label: 'update HR employee' },
   { method: 'post', path: '/api/hrms/departments', deniedRole: 'Réceptionniste', label: 'create HR department' },
@@ -120,6 +121,18 @@ describe('RBAC enforcement on write endpoints (server/routes/api.ts)', () => {
       .put('/api/housekeeping-tasks/task-1')
       .set('Authorization', `Bearer ${tokenFor('Housekeeping')}`)
       .send({ status: 'Not A Real Status' });
+
+    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(400);
+  });
+
+  it('lets an allowed role (Magasinier / Stock) past the RBAC gate on PUT /api/stock-items', async () => {
+    // Missing/invalid `items` array: rejected before any DB access, so this
+    // proves the role check passed without ever touching the database.
+    const res = await request(app)
+      .put('/api/stock-items')
+      .set('Authorization', `Bearer ${tokenFor('Magasinier / Stock')}`)
+      .send({});
 
     expect(res.status).not.toBe(403);
     expect(res.status).toBe(400);

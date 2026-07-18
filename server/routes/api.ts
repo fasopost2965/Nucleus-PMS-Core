@@ -4,7 +4,7 @@ import { db } from '../config/db';
 import { generateToken } from '../config/jwt';
 import { authMiddleware, AuthenticatedRequest } from '../middlewares/authMiddleware';
 import { requireRole } from '../middlewares/roleMiddleware';
-import { ADMIN_ROLES, RECEPTION_ROLES, HOUSEKEEPING_ROLES, resolveRole } from '../config/roles';
+import { ADMIN_ROLES, RECEPTION_ROLES, HOUSEKEEPING_ROLES, STOCK_WRITE_ROLES, resolveRole } from '../config/roles';
 import { hasOverlappingReservation, computeNights, computeReservationPricing } from '../services/reservationPricing';
 import { sendPasswordResetEmail } from '../services/mailer';
 
@@ -1613,7 +1613,39 @@ router.put('/housekeeping-tasks/:id', requireRole(...HOUSEKEEPING_ROLES), async 
 });
 
 // ==========================================
-// 9. HOTEL SETTINGS ENDPOINTS
+// 9. STOCK ENDPOINTS
+// ==========================================
+// Scoped to stock_items only — the only stock-related table that exists in
+// schema.sql. Suppliers, stock movements and the linen-washing workflow in
+// src/pages/Inventory.tsx remain a local simulation: wiring those would mean
+// designing new schema/tables, not connecting to something that already
+// exists (see BRUNCH_BOUAKE_PMS Changelog).
+
+router.get('/stock-items', async (req, res, next) => {
+  try {
+    const items = await db.getCollection('stock_items');
+    return res.status(200).json({ success: true, items });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/stock-items', requireRole(...STOCK_WRITE_ROLES), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { items } = req.body;
+    if (!items || !Array.isArray(items)) {
+      return res.status(400).json({ success: false, error: { message: 'Données de stock invalides.' } });
+    }
+    await db.saveCollection('stock_items', items);
+    await logActivity(req.user?.id || 1, 'stock', 'update_stock_items', null, `Mise à jour du référentiel de stock (${items.length} articles)`);
+    return res.status(200).json({ success: true, items });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ==========================================
+// 10. HOTEL SETTINGS ENDPOINTS
 // ==========================================
 router.get('/room_categories', async (req, res, next) => {
   try {
@@ -1653,7 +1685,7 @@ router.put('/settings/hotel', requireRole(...ADMIN_ROLES), async (req: Authentic
 });
 
 // ==========================================
-// 10. SYSTEM MAINTENANCE ENDPOINTS (PURGE & SEED)
+// 11. SYSTEM MAINTENANCE ENDPOINTS (PURGE & SEED)
 // ==========================================
 import { getInitialSeedData, writeDB, readDB } from '../config/db';
 
@@ -1715,7 +1747,7 @@ router.post('/system/purge', requireRole(...ADMIN_ROLES), async (req: Authentica
 
 
 // ==========================================
-// 11. SYSTEM SYNCHRONIZATION ENDPOINTS
+// 12. SYSTEM SYNCHRONIZATION ENDPOINTS
 // ==========================================
 
 const nameMap: Record<string, string> = {

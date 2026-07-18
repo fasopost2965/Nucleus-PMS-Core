@@ -123,6 +123,13 @@ export const api = {
   updateHousekeepingTaskStatus: (id: string, status: string) =>
     request(`/housekeeping-tasks/${id}`, { method: 'PUT', body: JSON.stringify({ status }) }),
 
+  // Stock API (stock_items only — see server/routes/api.ts section 9)
+  getStockItems: async (): Promise<any[]> => {
+    const res = await request('/stock-items');
+    return res.items || [];
+  },
+  updateStockItems: (items: any[]) => request('/stock-items', { method: 'PUT', body: JSON.stringify({ items }) }),
+
   // Guests API
   getGuests: async (): Promise<any[]> => {
     const res = await request('/guests');
