@@ -12,6 +12,7 @@ Tous les changements majeurs apportés à l'architecture de la plateforme, au sc
 
 ### Modules branchés sur l'API réelle
 * **`Reception.tsx`** ne fonctionnait qu'en `localStorage`/données simulées (aucun appel API), en contradiction directe avec l'objectif d'intégrité des données de la plateforme. Le module charge désormais les chambres, réservations et clients depuis l'API, et le check-in/check-out/changement de statut de chambre persistent réellement en base.
+* **`Finance.tsx`** (onglets Factures et Règlements) : `POST /finance/payments` existait déjà mais ne mettait jamais à jour la facture associée (le solde restant pouvait diverger arbitrairement des paiements réels). Nouvel endpoint `POST /finance/invoices/:id/pay` (atomique via `db.runTransaction`, montant plafonné serveur au solde réel) et `GET /finance/payments` (n'existait pas). Les onglets Dépenses et Caisse restent en simulation locale — aucune table `expenses` ni concept de caisse/shift n'existe dans le schéma.
 
 ### Traçabilité
 * **Couverture du journal d'audit étendue** : `logActivity()` n'était appelé que sur ~12 routes admin sur une trentaine d'écritures. Ajouté sur les routes clients, réservations, check-in/check-out, paiements, l'ensemble des routes RH, catégories de chambres, paramètres hôtel, et les opérations système sensibles (`/system/purge`, `/system/sync`, `/system/seed`), ainsi que sur le changement/la réinitialisation de mot de passe.
