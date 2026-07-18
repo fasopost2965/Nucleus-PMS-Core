@@ -45,6 +45,13 @@ export const DEFAULT_ROLE_PRIVILEGES: Record<string, string[]> = {
 
 /**
  * Checks if a user has access to a specific PMS module path.
+ *
+ * Note: this only drives client-side UI (menu visibility, route redirects).
+ * It must never be treated as a security boundary — the backend re-checks
+ * every write with its own role middleware (see server/routes/api.ts).
+ * Privileges are intentionally NOT read from localStorage: that value is
+ * fully attacker-controlled from the browser console and was previously
+ * used as an unauthenticated privilege-escalation vector.
  */
 export function hasPermission(email: string, role: string, path: string): boolean {
   // Super Admins and Support always have absolute access
@@ -57,18 +64,6 @@ export function hasPermission(email: string, role: string, path: string): boolea
     return true;
   }
 
-  // Check if there are custom override privileges in localStorage
-  const customPrivilegesRaw = localStorage.getItem(`pms_privileges_${email.toLowerCase().trim()}`);
-  if (customPrivilegesRaw) {
-    try {
-      const customPaths = JSON.parse(customPrivilegesRaw) as string[];
-      return customPaths.includes(path);
-    } catch (e) {
-      console.error('Error parsing custom privileges:', e);
-    }
-  }
-
-  // Fallback to role-based default privileges
   const defaults = DEFAULT_ROLE_PRIVILEGES[role];
   if (defaults) {
     return defaults.includes(path);
@@ -78,31 +73,8 @@ export function hasPermission(email: string, role: string, path: string): boolea
 }
 
 /**
- * Retrieves the current privileges for a specific user (either custom overrides or role defaults).
+ * Retrieves the default privileges for a given role.
  */
 export function getUserPrivileges(email: string, role: string): string[] {
-  const customPrivilegesRaw = localStorage.getItem(`pms_privileges_${email.toLowerCase().trim()}`);
-  if (customPrivilegesRaw) {
-    try {
-      return JSON.parse(customPrivilegesRaw) as string[];
-    } catch (e) {
-      console.error('Error parsing custom privileges:', e);
-    }
-  }
-
   return DEFAULT_ROLE_PRIVILEGES[role] || ['/dashboard'];
-}
-
-/**
- * Saves custom privilege overrides for a specific user.
- */
-export function saveUserPrivileges(email: string, paths: string[]): void {
-  localStorage.setItem(`pms_privileges_${email.toLowerCase().trim()}`, JSON.stringify(paths));
-}
-
-/**
- * Reset/clear custom privileges for a specific user (reverts back to role defaults).
- */
-export function resetUserPrivileges(email: string): void {
-  localStorage.removeItem(`pms_privileges_${email.toLowerCase().trim()}`);
 }
