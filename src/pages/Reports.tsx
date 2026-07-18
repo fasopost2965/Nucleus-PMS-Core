@@ -3,29 +3,74 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
-import { 
-  BarChart3, 
-  Download, 
-  Search, 
-  HelpCircle, 
-  FileSpreadsheet, 
-  Eye, 
-  Printer, 
-  Calendar, 
-  Clock, 
-  User, 
-  Shield, 
-  Activity, 
-  Users 
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  BarChart3,
+  Download,
+  Search,
+  HelpCircle,
+  FileSpreadsheet,
+  Eye,
+  Printer,
+  Calendar,
+  Clock,
+  User,
+  Shield,
+  Activity,
+  Users
 } from 'lucide-react';
 import { PageHeader, Badge, AlertBanner, StatCard } from '../components/ui/pms-ui';
+import { api } from '../utils/api';
+
+interface IMonthlyPerformanceReport {
+  period: string;
+  revenue: number;
+  occupiedNights: number;
+  occupancyRate: number;
+  taxCollected: number;
+}
+
+const MONTH_LABELS = [
+  'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+  'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'
+];
+
+function formatReportPeriod(period: string): string {
+  const [year, month] = period.split('-').map(Number);
+  const label = MONTH_LABELS[month - 1];
+  return label ? `${label} ${year}` : period;
+}
 
 export default function Reports() {
   const [successMsg, setSuccessMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
   const [activeTab, setActiveTab] = useState<'financial' | 'timesheets'>('financial');
   const [employeeFilter, setEmployeeFilter] = useState('');
-  
+
+  // Financial performance is computed server-side from real reservations
+  // (see server/services/financialReports.ts). The Timesheets/Connections
+  // tab below has no backend counterpart at all — no schema table tracks
+  // clock-in/out sessions or login events — and stays a local simulation.
+  const [performanceReports, setPerformanceReports] = useState<IMonthlyPerformanceReport[]>([]);
+  const [isReportsLoading, setIsReportsLoading] = useState(true);
+
+  const loadReports = useCallback(async () => {
+    setIsReportsLoading(true);
+    try {
+      const reports = await api.getFinancialPerformanceReports();
+      setPerformanceReports(reports);
+      setErrorMsg('');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Impossible de charger les rapports financiers.');
+    } finally {
+      setIsReportsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadReports();
+  }, [loadReports]);
+
   const isPurged = localStorage.getItem('pms_db_purged') === 'true';
 
   // Current logged in user
@@ -94,13 +139,6 @@ export default function Reports() {
     setTimeout(() => setSuccessMsg(''), 5000);
   };
 
-  const performanceReports = isPurged ? [] : [
-    { period: 'Juillet 2026', ca: '15 420 000 FCFA', occupied_nights: 168, occupancy_rate: '74%', tax: '771 000 FCFA' },
-    { period: 'Juin 2026', ca: '12 850 000 FCFA', occupied_nights: 144, occupancy_rate: '68%', tax: '642 500 FCFA' },
-    { period: 'Mai 2026', ca: '11 120 000 FCFA', occupied_nights: 120, occupancy_rate: '61%', tax: '556 000 FCFA' },
-    { period: 'Avril 2026', ca: '9 450 000 FCFA', occupied_nights: 98, occupancy_rate: '55%', tax: '472 500 FCFA' },
-  ];
-
   // Filter global timesheet logs
   const filteredGlobalLogs = timesheetHistory.filter(log => {
     if (!employeeFilter) return true;
@@ -151,6 +189,9 @@ export default function Reports() {
       </div>
 
       <div className="p-6 lg:p-8 space-y-6 flex-1 overflow-y-auto">
+        {errorMsg && (
+          <AlertBanner text={errorMsg} type="error" />
+        )}
         {successMsg && (
           <AlertBanner text={successMsg} type="success" />
         )}
@@ -214,17 +255,19 @@ export default function Reports() {
                     {performanceReports.length === 0 ? (
                       <tr>
                         <td colSpan={6} className="py-8 px-6 text-center text-slate-400 font-medium">
-                          Aucune donnée mensuelle disponible. Les rapports se rempliront automatiquement dès l'enregistrement des vrais séjours et de l'activation des folios.
+                          {isReportsLoading
+                            ? 'Chargement des rapports...'
+                            : "Aucune donnée mensuelle disponible. Les rapports se rempliront automatiquement dès l'enregistrement des vraies réservations."}
                         </td>
                       </tr>
                     ) : (
                       performanceReports.map((report, idx) => (
                         <tr key={idx} className="hover:bg-slate-50/50">
-                          <td className="py-3.5 px-6 font-bold text-slate-900">{report.period}</td>
-                          <td className="py-3.5 px-4 text-right font-mono font-extrabold text-slate-800">{report.ca}</td>
-                          <td className="py-3.5 px-4 text-center font-semibold text-slate-600">{report.occupied_nights} nuits</td>
-                          <td className="py-3.5 px-4 text-center font-bold text-slate-700">{report.occupancy_rate}</td>
-                          <td className="py-3.5 px-4 text-right font-mono font-semibold text-slate-500">{report.tax}</td>
+                          <td className="py-3.5 px-6 font-bold text-slate-900">{formatReportPeriod(report.period)}</td>
+                          <td className="py-3.5 px-4 text-right font-mono font-extrabold text-slate-800">{report.revenue.toLocaleString()} XOF</td>
+                          <td className="py-3.5 px-4 text-center font-semibold text-slate-600">{report.occupiedNights} nuits</td>
+                          <td className="py-3.5 px-4 text-center font-bold text-slate-700">{report.occupancyRate}%</td>
+                          <td className="py-3.5 px-4 text-right font-mono font-semibold text-slate-500">{report.taxCollected.toLocaleString()} XOF</td>
                           <td className="py-3.5 px-6 text-right space-x-2">
                             <button
                               onClick={() => alert(`Aperçu à l'écran du rapport pour ${report.period} simulé.`)}

@@ -145,6 +145,12 @@ export const api = {
   updateRestaurantOrderStatus: (id: string, status: string) =>
     request(`/restaurant/orders/${id}`, { method: 'PUT', body: JSON.stringify({ status }) }),
 
+  // Reports API
+  getFinancialPerformanceReports: async (): Promise<any[]> => {
+    const res = await request('/reports/financial-performance');
+    return res.reports || [];
+  },
+
   // Guests API
   getGuests: async (): Promise<any[]> => {
     const res = await request('/guests');

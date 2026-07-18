@@ -7,6 +7,7 @@ import { requireRole } from '../middlewares/roleMiddleware';
 import { ADMIN_ROLES, RECEPTION_ROLES, HOUSEKEEPING_ROLES, STOCK_WRITE_ROLES, resolveRole } from '../config/roles';
 import { hasOverlappingReservation, computeNights, computeReservationPricing } from '../services/reservationPricing';
 import { sendPasswordResetEmail } from '../services/mailer';
+import { computeMonthlyPerformance } from '../services/financialReports';
 
 const router = Router();
 
@@ -1725,7 +1726,28 @@ router.put('/restaurant/orders/:id', requireRole(...RECEPTION_ROLES), async (req
 });
 
 // ==========================================
-// 11. HOTEL SETTINGS ENDPOINTS
+// 11. REPORTS ENDPOINTS
+// ==========================================
+// The "Timesheets & Connections" tab in Reports.tsx has no counterpart
+// here: no schema table tracks employee clock-in/clock-out sessions or
+// login/logout events, so it stays a local simulation. Only the financial
+// performance report below is computed from real data.
+
+router.get('/reports/financial-performance', async (req, res, next) => {
+  try {
+    const [reservations, rooms] = await Promise.all([
+      db.getCollection('reservations'),
+      db.getCollection('rooms')
+    ]);
+    const reports = computeMonthlyPerformance(reservations, rooms.length);
+    return res.status(200).json({ success: true, reports });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ==========================================
+// 12. HOTEL SETTINGS ENDPOINTS
 // ==========================================
 router.get('/room_categories', async (req, res, next) => {
   try {
@@ -1765,7 +1787,7 @@ router.put('/settings/hotel', requireRole(...ADMIN_ROLES), async (req: Authentic
 });
 
 // ==========================================
-// 12. SYSTEM MAINTENANCE ENDPOINTS (PURGE & SEED)
+// 13. SYSTEM MAINTENANCE ENDPOINTS (PURGE & SEED)
 // ==========================================
 import { getInitialSeedData, writeDB, readDB } from '../config/db';
 
@@ -1827,7 +1849,7 @@ router.post('/system/purge', requireRole(...ADMIN_ROLES), async (req: Authentica
 
 
 // ==========================================
-// 13. SYSTEM SYNCHRONIZATION ENDPOINTS
+// 14. SYSTEM SYNCHRONIZATION ENDPOINTS
 // ==========================================
 
 const nameMap: Record<string, string> = {
