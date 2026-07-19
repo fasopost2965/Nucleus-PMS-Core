@@ -4,6 +4,15 @@ Tous les changements majeurs apportés à l'architecture de la plateforme, au sc
 
 ---
 
+## [1.3.1] - 2026-07-19
+### Correctif critique — réinitialisation de mot de passe
+* **Bug de fond identifié en production** : `reset_code` et `reset_code_expires` étaient écrits par le flux mot de passe oublié (`server/routes/api.ts`) mais n'avaient **jamais été ajoutés comme colonnes MySQL** (contrairement à `must_change_password`, `logo`, `extra_config`, chacun ayant sa propre migration `ALTER TABLE` dans `server/config/db.ts`). Conséquence concrète sur tout déploiement où MySQL est configuré (`DB_HOST` défini) : `saveCollection()` filtre chaque écriture contre `DESCRIBE users` avant de synchroniser vers MySQL — `reset_code`/`reset_code_expires` n'étant pas des colonnes réelles, ils étaient silencieusement supprimés de la synchronisation. La lecture suivante (`reset-password`) privilégiant MySQL quand il est en ligne, elle ne voyait jamais le code généré : **le code de réinitialisation était donc toujours rejeté comme invalide, quel que soit le code réellement saisi.** Ce n'était pas un problème de configuration SMTP ni de déploiement — un bug structurel, indépendant de l'email.
+* **Corrigé** : ajout des deux migrations `ALTER TABLE` manquantes (même patron que les autres colonnes ajoutées après coup) + ajout des deux colonnes dans `schema.sql` pour les nouvelles installations.
+* **Observabilité** : un échec d'envoi d'email de réinitialisation est désormais aussi consigné dans `audit_logs` (visible dans Admin > Journal d'activité), pas seulement dans les logs serveur — un administrateur peut diagnostiquer un souci de livraison sans accès SSH.
+* **Rappel** : l'écran Admin > Utilisateurs > Modifier permet déjà à un Super Administrateur de définir directement le mot de passe de n'importe quel compte (`PUT /users/:id`), sans dépendre de l'email — c'est le moyen immédiat de débloquer un compte, indépendamment de ce correctif.
+
+---
+
 ## [1.3.0] - 2026-07-18
 ### Intégrité des données
 * **Transactions atomiques pour les flux réservation/chambre** : la création d'une réservation, le check-in et le check-out effectuaient deux écritures indépendantes (réservation puis chambre), avec un risque réel de désynchronisation en cas d'échec entre les deux (ex. chambre restée "Occupée" alors que la réservation est déjà "Terminée"). Ajout de `db.runTransaction()` (`server/config/db.ts`) : écriture atomique unique pour le stockage JSON local, et transaction SQL réelle (`BEGIN`/`COMMIT`/`ROLLBACK`) lorsque MySQL est le backend actif.
