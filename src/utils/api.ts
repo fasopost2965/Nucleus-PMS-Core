@@ -105,6 +105,8 @@ export const api = {
   },
   createRoom: (data: any) => request('/rooms', { method: 'POST', body: JSON.stringify(data) }),
   updateRoom: (id: string, data: any) => request(`/rooms/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  updateRoomStatus: (id: string, data: { current_status?: string; housekeeping_status?: string; maintenance_status?: string }) =>
+    request(`/rooms/${id}/status`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteRoom: (id: string) => request(`/rooms/${id}`, { method: 'DELETE' }),
 
   getRoomCategories: async (): Promise<any[]> => {
@@ -112,6 +114,42 @@ export const api = {
     return res.categories || [];
   },
   updateRoomCategories: (categories: any[]) => request('/room_categories', { method: 'PUT', body: JSON.stringify({ categories }) }),
+
+  // Housekeeping API
+  getHousekeepingTasks: async (): Promise<any[]> => {
+    const res = await request('/housekeeping-tasks');
+    return res.tasks || [];
+  },
+  updateHousekeepingTaskStatus: (id: string, status: string) =>
+    request(`/housekeeping-tasks/${id}`, { method: 'PUT', body: JSON.stringify({ status }) }),
+
+  // Stock API (stock_items only — see server/routes/api.ts section 9)
+  getStockItems: async (): Promise<any[]> => {
+    const res = await request('/stock-items');
+    return res.items || [];
+  },
+  updateStockItems: (items: any[]) => request('/stock-items', { method: 'PUT', body: JSON.stringify({ items }) }),
+
+  // Restaurant API
+  getMenuItems: async (): Promise<any[]> => {
+    const res = await request('/restaurant/menu-items');
+    return res.menuItems || [];
+  },
+  createMenuItem: (data: any) => request('/restaurant/menu-items', { method: 'POST', body: JSON.stringify(data) }),
+  updateMenuItem: (id: string, data: any) => request(`/restaurant/menu-items/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  getRestaurantOrders: async (): Promise<any[]> => {
+    const res = await request('/restaurant/orders');
+    return res.orders || [];
+  },
+  updateRestaurantOrderStatus: (id: string, status: string) =>
+    request(`/restaurant/orders/${id}`, { method: 'PUT', body: JSON.stringify({ status }) }),
+
+  // Reports API
+  getFinancialPerformanceReports: async (): Promise<any[]> => {
+    const res = await request('/reports/financial-performance');
+    return res.reports || [];
+  },
 
   // Guests API
   getGuests: async (): Promise<any[]> => {
@@ -132,6 +170,19 @@ export const api = {
   },
   createReservation: (data: any) => request('/reservations', { method: 'POST', body: JSON.stringify(data) }),
   checkInReservation: (id: string) => request(`/reservations/${id}/check-in`, { method: 'POST' }),
+  checkOutReservation: (id: string) => request(`/reservations/${id}/check-out`, { method: 'POST' }),
+
+  // Finance API
+  getInvoices: async (): Promise<any[]> => {
+    const res = await request('/finance/invoices');
+    return res.invoices || [];
+  },
+  getPayments: async (): Promise<any[]> => {
+    const res = await request('/finance/payments');
+    return res.payments || [];
+  },
+  payInvoice: (invoiceId: string, data: { payment_method: string; amount?: number; reference?: string }) =>
+    request(`/finance/invoices/${invoiceId}/pay`, { method: 'POST', body: JSON.stringify(data) }),
 
   // HRMS API
   getEmployees: async (): Promise<any[]> => {

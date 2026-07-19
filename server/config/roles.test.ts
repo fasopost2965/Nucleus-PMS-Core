@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ADMIN_ROLES, RECEPTION_ROLES, FALLBACK_ROLE, resolveRole } from './roles';
+import { ADMIN_ROLES, RECEPTION_ROLES, HOUSEKEEPING_ROLES, STOCK_WRITE_ROLES, FALLBACK_ROLE, resolveRole } from './roles';
 
 describe('roles config', () => {
   it('ADMIN_ROLES contains exactly the two administrative roles', () => {
@@ -10,9 +10,20 @@ describe('roles config', () => {
     expect(RECEPTION_ROLES).toEqual(['Super Administrateur', 'Directeur', 'Réceptionniste']);
   });
 
+  it('HOUSEKEEPING_ROLES extends ADMIN_ROLES with Réceptionniste and Housekeeping', () => {
+    expect(HOUSEKEEPING_ROLES).toEqual(['Super Administrateur', 'Directeur', 'Réceptionniste', 'Housekeeping']);
+  });
+
+  it('STOCK_WRITE_ROLES contains Super Administrateur and Magasinier / Stock, but not Directeur (read-only on this module)', () => {
+    expect(STOCK_WRITE_ROLES).toEqual(['Super Administrateur', 'Magasinier / Stock']);
+    expect(STOCK_WRITE_ROLES).not.toContain('Directeur');
+  });
+
   it('FALLBACK_ROLE is not part of any privileged role group', () => {
     expect(ADMIN_ROLES).not.toContain(FALLBACK_ROLE);
     expect(RECEPTION_ROLES).not.toContain(FALLBACK_ROLE);
+    expect(HOUSEKEEPING_ROLES).not.toContain(FALLBACK_ROLE);
+    expect(STOCK_WRITE_ROLES).not.toContain(FALLBACK_ROLE);
   });
 
   describe('resolveRole', () => {

@@ -1,3 +1,10 @@
+// Must be the very first import: it loads .env into process.env as a side
+// effect, and has to run before anything else (apiRouter -> config/jwt.ts,
+// config/db.ts, etc.) reads process.env at module-load time. `dotenv` was
+// already a dependency but was never actually wired in, so a .env file on
+// disk was silently ignored — only variables already present in the shell's
+// own environment ever reached the app.
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import helmet from 'helmet';

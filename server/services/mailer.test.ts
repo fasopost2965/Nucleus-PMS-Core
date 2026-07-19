@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const sendMailMock = vi.fn();
-const createTransportMock = vi.fn(() => ({ sendMail: sendMailMock }));
+const createTransportMock = vi.fn((config: unknown) => ({ sendMail: sendMailMock }));
 
 vi.mock('nodemailer', () => ({
-  default: { createTransport: (...args: unknown[]) => createTransportMock(...args) }
+  default: { createTransport: (config: unknown) => createTransportMock(config) }
 }));
 
 const ORIGINAL_ENV = { ...process.env };

@@ -12,19 +12,39 @@ import {
   Users, Edit2
 } from 'lucide-react';
 import { PageHeader, Badge, AlertBanner } from '../components/ui/pms-ui';
-import { mockStockItems, mockSuppliers, mockRooms } from '../mockData';
+import { mockSuppliers, mockRooms } from '../mockData';
 import { IStockItem, IStockMovement, ISupplier, IHousekeepingTask } from '../types';
 import { getStockMovements, saveStockMovements, logManualStockMovement, formatCurrentTimestamp } from '../stockService';
+import { api } from '../utils/api';
 
 export default function Inventory() {
-  // Sync stock with localStorage
-  const [stock, setStock] = useState<IStockItem[]>(() => {
-    const stored = localStorage.getItem('pms_stock');
-    if (stored) {
-      try { return JSON.parse(stored); } catch (e) {}
-    }
-    return mockStockItems;
-  });
+  // Stock items are the real data, loaded from the API (see
+  // server/routes/api.ts section 9 — the only stock-related table that
+  // exists in schema.sql). Suppliers, movements and the linen-washing
+  // simulation below remain local: there is no backend for them to connect
+  // to without designing new schema/tables first.
+  const [stock, setStock] = useState<IStockItem[]>([]);
+  const [isStockLoading, setIsStockLoading] = useState(true);
+  const [stockErrorMsg, setStockErrorMsg] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setIsStockLoading(true);
+      try {
+        const items = await api.getStockItems();
+        if (!cancelled) {
+          setStock(items);
+          setStockErrorMsg('');
+        }
+      } catch (err: any) {
+        if (!cancelled) setStockErrorMsg(err.message || 'Impossible de charger le stock.');
+      } finally {
+        if (!cancelled) setIsStockLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Sync stock movements with localStorage
   const [movements, setMovements] = useState<IStockMovement[]>(() => {
@@ -141,7 +161,9 @@ export default function Inventory() {
 
   const saveStock = (newStock: IStockItem[]) => {
     setStock(newStock);
-    localStorage.setItem('pms_stock', JSON.stringify(newStock));
+    api.updateStockItems(newStock)
+      .then(() => setStockErrorMsg(''))
+      .catch((err: any) => setStockErrorMsg(err.message || "Échec de l'enregistrement du stock — vos changements ne sont visibles que localement."));
   };
 
   const handleAdjustStock = (e: React.FormEvent) => {
@@ -435,8 +457,7 @@ export default function Inventory() {
       }
     });
 
-    localStorage.setItem('pms_stock', JSON.stringify(updatedStock));
-    setStock(updatedStock);
+    saveStock(updatedStock);
 
     // Notify other components/pages
     window.dispatchEvent(new Event('storage'));
@@ -598,8 +619,14 @@ export default function Inventory() {
       </div>
 
       <div className="p-6 lg:p-8 space-y-6 flex-1 overflow-y-auto">
+        {stockErrorMsg && (
+          <AlertBanner text={stockErrorMsg} type="error" />
+        )}
         {successMsg && (
           <AlertBanner text={successMsg} type="success" />
+        )}
+        {isStockLoading && (
+          <AlertBanner text="Chargement du stock..." type="info" />
         )}
 
         {/* METRICS ROW */}

@@ -89,7 +89,7 @@ export function ConfirmDialog({
   );
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="sm" footer={footer}>
+    <Modal isOpen={isOpen} onClose={onClose} size="sm" footer={footer} ariaLabel={title}>
       <div className="flex items-start gap-4">
         <div className={`p-3 rounded-full border flex-shrink-0 ${currentType.iconColor}`}>
           <IconComponent size={24} />

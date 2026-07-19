@@ -4,9 +4,10 @@ import { db } from '../config/db';
 import { generateToken } from '../config/jwt';
 import { authMiddleware, AuthenticatedRequest } from '../middlewares/authMiddleware';
 import { requireRole } from '../middlewares/roleMiddleware';
-import { ADMIN_ROLES, RECEPTION_ROLES, resolveRole } from '../config/roles';
+import { ADMIN_ROLES, RECEPTION_ROLES, HOUSEKEEPING_ROLES, STOCK_WRITE_ROLES, resolveRole } from '../config/roles';
 import { hasOverlappingReservation, computeNights, computeReservationPricing } from '../services/reservationPricing';
 import { sendPasswordResetEmail } from '../services/mailer';
+import { computeMonthlyPerformance } from '../services/financialReports';
 
 const router = Router();
 
@@ -153,7 +154,20 @@ router.post('/auth/forgot-password', async (req, res, next) => {
     const emailResult = await sendPasswordResetEmail(user.email, resetCode, hotelName);
     if (!emailResult.sent) {
       console.warn(`[Auth] Code de réinitialisation généré pour ${user.email} mais l'email n'a pas pu être envoyé (${emailResult.reason}).`);
+      // Also recorded in audit_logs (visible from Admin > Journal d'activité)
+      // so a delivery failure can be diagnosed from inside the app — an
+      // admin shouldn't need server/SSH access just to find out why a
+      // colleague never received their reset code.
+      await logActivity(
+        user.id,
+        'auth',
+        'password_reset_email_failed',
+        String(user.id),
+        `Échec d'envoi du code de réinitialisation à ${user.email} (raison : ${emailResult.reason}). Un administrateur peut réinitialiser ce mot de passe directement depuis Admin > Utilisateurs.`
+      );
     }
+
+    await logActivity(user.id, 'auth', 'request_password_reset', String(user.id), `Code de réinitialisation demandé pour ${user.email}.`);
 
     // The reset code is only echoed back outside production, for local testing.
     // In production it must be delivered by email — never in the API response.
@@ -196,6 +210,7 @@ router.post('/auth/reset-password', async (req, res, next) => {
       reset_code_expires: null
     });
 
+    await logActivity(user.id, 'auth', 'reset_password', String(user.id), `Mot de passe réinitialisé via le code de récupération envoyé par email.`);
     return res.status(200).json({
       success: true,
       message: 'Votre mot de passe a été réinitialisé avec succès !'
@@ -240,6 +255,7 @@ router.post('/auth/change-password', async (req: AuthenticatedRequest, res, next
       must_change_password: false
     });
 
+    await logActivity(user.id, 'auth', 'change_password', String(user.id), `Changement de mot de passe par l'utilisateur lui-même.`);
     return res.status(200).json({
       success: true,
       message: 'Votre mot de passe a été modifié avec succès.'
@@ -939,6 +955,40 @@ router.put('/rooms/:id', requireRole(...ADMIN_ROLES), async (req: AuthenticatedR
   }
 });
 
+// Deliberately separate from PUT /rooms/:id: front-desk/housekeeping staff
+// need to flip a room's operational status (occupied/dirty/maintenance) as
+// part of check-in, check-out and incident reporting, but must never be
+// able to touch the room catalog's pricing/category through the same call
+// — hence a narrow field whitelist instead of reusing the admin-only
+// full-record update endpoint.
+const ROOM_STATUS_FIELDS = ['current_status', 'housekeeping_status', 'maintenance_status'];
+
+router.put('/rooms/:id/status', requireRole(...RECEPTION_ROLES), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    const fields: Record<string, any> = {};
+    for (const key of ROOM_STATUS_FIELDS) {
+      if (req.body[key] !== undefined) fields[key] = req.body[key];
+    }
+    if (Object.keys(fields).length === 0) {
+      return res.status(400).json({ success: false, error: { message: 'Aucun statut valide fourni.' } });
+    }
+
+    const updated = await db.update('rooms', id, {
+      ...fields,
+      updated_by: req.user?.name || 'Réception'
+    });
+    if (!updated) {
+      return res.status(404).json({ success: false, error: { message: 'Chambre introuvable.' } });
+    }
+
+    await logActivity(req.user?.id || 1, 'rooms', 'update_room_status', id, `Changement de statut de la chambre ${updated.room_number} : ${JSON.stringify(fields)}`);
+    return res.status(200).json({ success: true, room: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.delete('/rooms/:id', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
@@ -968,7 +1018,7 @@ router.get('/guests', async (req, res, next) => {
   }
 });
 
-router.post('/guests', requireRole(...RECEPTION_ROLES), async (req, res, next) => {
+router.post('/guests', requireRole(...RECEPTION_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const newGuest = {
       id: `guest-${Date.now()}`,
@@ -979,19 +1029,21 @@ router.post('/guests', requireRole(...RECEPTION_ROLES), async (req, res, next) =
       updated_at: new Date().toISOString()
     };
     const inserted = await db.insert('guests', newGuest);
+    await logActivity(req.user?.id || 1, 'guests', 'create_guest', inserted.id, `Création de la fiche client ${inserted.first_name || ''} ${inserted.last_name || ''}`);
     return res.status(201).json({ success: true, guest: inserted });
   } catch (err) {
     next(err);
   }
 });
 
-router.put('/guests/:id', requireRole(...RECEPTION_ROLES), async (req, res, next) => {
+router.put('/guests/:id', requireRole(...RECEPTION_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     const updated = await db.update('guests', id, req.body);
     if (!updated) {
       return res.status(404).json({ success: false, error: { message: 'Client introuvable.' } });
     }
+    await logActivity(req.user?.id || 1, 'guests', 'update_guest', id, `Mise à jour de la fiche client ${updated.first_name || ''} ${updated.last_name || ''}`);
     return res.status(200).json({ success: true, guest: updated });
   } catch (err) {
     next(err);
@@ -1022,7 +1074,7 @@ router.get('/reservations', async (req, res, next) => {
   }
 });
 
-router.post('/reservations', requireRole(...RECEPTION_ROLES), async (req, res, next) => {
+router.post('/reservations', requireRole(...RECEPTION_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { guest_id, room_id, arrival_date, departure_date, booking_source_id, adults, children, discount, deposit, remarks } = req.body;
     if (!guest_id || !room_id || !arrival_date || !departure_date) {
@@ -1082,18 +1134,25 @@ router.post('/reservations', requireRole(...RECEPTION_ROLES), async (req, res, n
       updated_at: new Date().toISOString()
     };
 
-    const inserted = await db.insert('reservations', newRes);
+    // Creating the reservation and reserving the room happen as a single
+    // atomic operation: a reservation must never exist without its room
+    // being marked unavailable, or vice versa.
+    const results = await db.runTransaction([
+      { type: 'insert', collection: 'reservations', item: newRes },
+      { type: 'update', collection: 'rooms', id: room_id, fields: { current_status: 'Réservée' } }
+    ]);
+    if (!results) {
+      return res.status(400).json({ success: false, error: { message: 'La chambre sélectionnée est invalide ou introuvable.' } });
+    }
 
-    // Auto update room status to reserved
-    await db.update('rooms', room_id, { current_status: 'Réservée' });
-
-    return res.status(201).json({ success: true, reservation: inserted });
+    await logActivity(req.user?.id || 1, 'reservations', 'create_reservation', newRes.id, `Création de la réservation ${newRes.reservation_number}`);
+    return res.status(201).json({ success: true, reservation: results[0] });
   } catch (err) {
     next(err);
   }
 });
 
-router.post('/reservations/:id/check-in', requireRole(...RECEPTION_ROLES), async (req, res, next) => {
+router.post('/reservations/:id/check-in', requireRole(...RECEPTION_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     const reservation = await db.getById('reservations', id);
@@ -1101,14 +1160,59 @@ router.post('/reservations/:id/check-in', requireRole(...RECEPTION_ROLES), async
       return res.status(404).json({ success: false, error: { message: 'Réservation introuvable.' } });
     }
 
-    await db.update('reservations', id, { status: 'En séjour' });
-    await db.update('rooms', reservation.room_id, { current_status: 'Occupée' });
+    // Both status flips must land together: a reservation can never be
+    // "En séjour" while its room is still "Réservée" (or the reverse).
+    const results = await db.runTransaction([
+      { type: 'update', collection: 'reservations', id, fields: { status: 'En séjour' } },
+      { type: 'update', collection: 'rooms', id: reservation.room_id, fields: { current_status: 'Occupée' } }
+    ]);
+    if (!results) {
+      return res.status(404).json({ success: false, error: { message: 'Réservation ou chambre associée introuvable.' } });
+    }
 
+    await logActivity(req.user?.id || 1, 'reservations', 'check_in', id, `Check-in enregistré pour la réservation ${reservation.reservation_number}`);
     return res.status(200).json({
       success: true,
       message: 'Check-in enregistré avec succès',
       roomStatus: 'Occupée',
       reservationStatus: 'En séjour'
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/reservations/:id/check-out', requireRole(...RECEPTION_ROLES), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    const reservation = await db.getById('reservations', id);
+    if (!reservation) {
+      return res.status(404).json({ success: false, error: { message: 'Réservation introuvable.' } });
+    }
+    if (reservation.status !== 'En séjour') {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Seul un séjour en cours peut faire l\'objet d\'un départ.', code: 'INVALID_RESERVATION_STATUS' }
+      });
+    }
+
+    // The room must always come out of "Occupée" the instant the stay ends,
+    // in the same atomic write as the reservation closing — never one
+    // without the other.
+    const results = await db.runTransaction([
+      { type: 'update', collection: 'reservations', id, fields: { status: 'Terminée' } },
+      { type: 'update', collection: 'rooms', id: reservation.room_id, fields: { current_status: 'À nettoyer' } }
+    ]);
+    if (!results) {
+      return res.status(404).json({ success: false, error: { message: 'Réservation ou chambre associée introuvable.' } });
+    }
+
+    await logActivity(req.user?.id || 1, 'reservations', 'check_out', id, `Check-out enregistré pour la réservation ${reservation.reservation_number}`);
+    return res.status(200).json({
+      success: true,
+      message: 'Départ enregistré avec succès',
+      roomStatus: 'À nettoyer',
+      reservationStatus: 'Terminée'
     });
   } catch (err) {
     next(err);
@@ -1151,7 +1255,73 @@ router.post('/finance/payments', requireRole(...RECEPTION_ROLES), async (req: Au
       status: 'Validé'
     };
     const inserted = await db.insert('payments', newPayment);
+    await logActivity(req.user?.id || 1, 'finance', 'record_payment', inserted.id, `Encaissement enregistré (${inserted.amount ?? '?'} ${inserted.currency ?? ''})`.trim());
     return res.status(201).json({ success: true, payment: inserted });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/finance/payments', async (req, res, next) => {
+  try {
+    const payments = await db.getCollection('payments');
+    return res.status(200).json({ success: true, payments });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Registers a payment against a specific invoice: the payment record and the
+// invoice's paid/balance/status must land together as a single atomic write
+// (the generic POST /finance/payments above never updated the invoice at
+// all, so an invoice's balance could silently drift from its actual
+// payments).
+router.post('/finance/invoices/:id/pay', requireRole(...RECEPTION_ROLES), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    const { payment_method, amount, reference } = req.body;
+    if (!payment_method) {
+      return res.status(400).json({ success: false, error: { message: 'Le moyen de paiement est requis.' } });
+    }
+
+    const invoice = await db.getById('invoices', id);
+    if (!invoice) {
+      return res.status(404).json({ success: false, error: { message: 'Facture introuvable.' } });
+    }
+    if (invoice.balance <= 0) {
+      return res.status(400).json({ success: false, error: { message: 'Cette facture est déjà entièrement réglée.', code: 'INVOICE_ALREADY_PAID' } });
+    }
+
+    // The amount collected is capped to the actual remaining balance —
+    // never trust a client-supplied amount that overshoots what's owed.
+    const requestedAmount = Number(amount);
+    const payAmount = requestedAmount > 0 ? Math.min(requestedAmount, invoice.balance) : invoice.balance;
+    const newPaid = Number(invoice.paid) + payAmount;
+    const newBalance = Number(invoice.total) - newPaid;
+    const newStatus = newBalance <= 0 ? 'Payée' : 'Partiellement payée';
+
+    const newPayment = {
+      id: `pay-${Date.now()}`,
+      invoice_id: id,
+      reservation_id: invoice.reservation_id,
+      payment_method,
+      amount: payAmount,
+      reference: typeof reference === 'string' ? reference : null,
+      payment_date: new Date().toISOString(),
+      cashier_id: req.user?.name || 'Caissier',
+      status: 'Validé'
+    };
+
+    const results = await db.runTransaction([
+      { type: 'insert', collection: 'payments', item: newPayment },
+      { type: 'update', collection: 'invoices', id, fields: { paid: newPaid, balance: Math.max(0, newBalance), status: newStatus } }
+    ]);
+    if (!results) {
+      return res.status(404).json({ success: false, error: { message: 'Facture introuvable.' } });
+    }
+
+    await logActivity(req.user?.id || 1, 'finance', 'register_invoice_payment', newPayment.id, `Encaissement de ${payAmount} sur la facture ${invoice.invoice_number}`);
+    return res.status(201).json({ success: true, payment: results[0], invoice: results[1] });
   } catch (err) {
     next(err);
   }
@@ -1197,19 +1367,21 @@ router.post('/hrms/employees', requireRole(...ADMIN_ROLES), async (req: Authenti
     };
     await db.insert('hrms_business_events', newEvent);
 
+    await logActivity(req.user?.id || 1, 'hrms', 'create_employee', inserted.id, `Création de la fiche employé ${newEmployee.first_name || ''} ${newEmployee.last_name || ''}`);
     return res.status(201).json({ success: true, employee: inserted });
   } catch (err) {
     next(err);
   }
 });
 
-router.put('/hrms/employees/:id', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.put('/hrms/employees/:id', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     const updated = await db.update('hrms_employees', id, req.body);
     if (!updated) {
       return res.status(404).json({ success: false, error: { message: 'Employé introuvable.' } });
     }
+    await logActivity(req.user?.id || 1, 'hrms', 'update_employee', id, `Mise à jour de la fiche employé ${updated.first_name || ''} ${updated.last_name || ''}`);
     return res.status(200).json({ success: true, employee: updated });
   } catch (err) {
     next(err);
@@ -1226,7 +1398,7 @@ router.get('/hrms/departments', async (req, res, next) => {
   }
 });
 
-router.post('/hrms/departments', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.post('/hrms/departments', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const newDept = {
       id: `dept-${Date.now()}`,
@@ -1235,6 +1407,7 @@ router.post('/hrms/departments', requireRole(...ADMIN_ROLES), async (req, res, n
       created_at: new Date().toISOString()
     };
     const inserted = await db.insert('hrms_departments', newDept);
+    await logActivity(req.user?.id || 1, 'hrms', 'create_department', inserted.id, `Création du département ${inserted.name || inserted.id}`);
     return res.status(201).json({ success: true, department: inserted });
   } catch (err) {
     next(err);
@@ -1251,7 +1424,7 @@ router.get('/hrms/jobs', async (req, res, next) => {
   }
 });
 
-router.post('/hrms/jobs', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.post('/hrms/jobs', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const newJob = {
       id: `job-${Date.now()}`,
@@ -1260,6 +1433,7 @@ router.post('/hrms/jobs', requireRole(...ADMIN_ROLES), async (req, res, next) =>
       created_at: new Date().toISOString()
     };
     const inserted = await db.insert('hrms_jobs', newJob);
+    await logActivity(req.user?.id || 1, 'hrms', 'create_job', inserted.id, `Création du poste ${inserted.title || inserted.id}`);
     return res.status(201).json({ success: true, job: inserted });
   } catch (err) {
     next(err);
@@ -1276,7 +1450,7 @@ router.get('/hrms/teams', async (req, res, next) => {
   }
 });
 
-router.post('/hrms/teams', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.post('/hrms/teams', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const newTeam = {
       id: `team-${Date.now()}`,
@@ -1285,6 +1459,7 @@ router.post('/hrms/teams', requireRole(...ADMIN_ROLES), async (req, res, next) =
       created_at: new Date().toISOString()
     };
     const inserted = await db.insert('hrms_teams', newTeam);
+    await logActivity(req.user?.id || 1, 'hrms', 'create_team', inserted.id, `Création de l'équipe ${inserted.name || inserted.id}`);
     return res.status(201).json({ success: true, team: inserted });
   } catch (err) {
     next(err);
@@ -1301,7 +1476,7 @@ router.get('/hrms/contracts', async (req, res, next) => {
   }
 });
 
-router.post('/hrms/contracts', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.post('/hrms/contracts', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const newContract = {
       id: `contract-${Date.now()}`,
@@ -1314,19 +1489,21 @@ router.post('/hrms/contracts', requireRole(...ADMIN_ROLES), async (req, res, nex
       updated_at: new Date().toISOString()
     };
     const inserted = await db.insert('hrms_contracts', newContract);
+    await logActivity(req.user?.id || 1, 'hrms', 'create_contract', inserted.id, `Création du contrat ${inserted.id} pour l'employé ${inserted.employee_id || '?'}`);
     return res.status(201).json({ success: true, contract: inserted });
   } catch (err) {
     next(err);
   }
 });
 
-router.put('/hrms/contracts/:id', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.put('/hrms/contracts/:id', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     const updated = await db.update('hrms_contracts', id, req.body);
     if (!updated) {
       return res.status(404).json({ success: false, error: { message: 'Contrat introuvable.' } });
     }
+    await logActivity(req.user?.id || 1, 'hrms', 'update_contract', id, `Mise à jour du contrat ${id}`);
     return res.status(200).json({ success: true, contract: updated });
   } catch (err) {
     next(err);
@@ -1343,13 +1520,14 @@ router.get('/hrms/onboarding-tasks', async (req, res, next) => {
   }
 });
 
-router.put('/hrms/onboarding-tasks/:id', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.put('/hrms/onboarding-tasks/:id', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     const updated = await db.update('hrms_onboarding_tasks', id, req.body);
     if (!updated) {
       return res.status(404).json({ success: false, error: { message: 'Tâche introuvable.' } });
     }
+    await logActivity(req.user?.id || 1, 'hrms', 'update_onboarding_task', id, `Mise à jour de la tâche d'intégration ${id}`);
     return res.status(200).json({ success: true, onboardingTask: updated });
   } catch (err) {
     next(err);
@@ -1397,7 +1575,190 @@ router.get('/hrms/business-events', async (req, res, next) => {
 });
 
 // ==========================================
-// 8. HOTEL SETTINGS ENDPOINTS
+// 8. HOUSEKEEPING ENDPOINTS
+// ==========================================
+
+router.get('/housekeeping-tasks', async (req, res, next) => {
+  try {
+    const tasks = await db.getCollection('housekeeping_tasks');
+    return res.status(200).json({ success: true, tasks });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/housekeeping-tasks/:id', requireRole(...HOUSEKEEPING_ROLES), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const allowedStatuses = ['À nettoyer', 'En cours', 'Contrôle', 'Disponible'];
+    if (!status || !allowedStatuses.includes(status)) {
+      return res.status(400).json({ success: false, error: { message: 'Statut de tâche invalide.' } });
+    }
+
+    const task = await db.getById('housekeeping_tasks', id);
+    if (!task) {
+      return res.status(404).json({ success: false, error: { message: 'Tâche de ménage introuvable.' } });
+    }
+
+    const taskFields: Record<string, any> = { status };
+    if (status === 'Disponible') {
+      taskFields.completed_time = new Date().toISOString();
+    }
+
+    // A room only becomes bookable again the instant its cleaning task is
+    // validated — the task and room status must land together, never one
+    // without the other.
+    const results = await db.runTransaction([
+      { type: 'update', collection: 'housekeeping_tasks', id, fields: taskFields },
+      { type: 'update', collection: 'rooms', id: task.room_id, fields: { housekeeping_status: status } }
+    ]);
+    if (!results) {
+      return res.status(404).json({ success: false, error: { message: 'Tâche ou chambre associée introuvable.' } });
+    }
+
+    await logActivity(req.user?.id || 1, 'housekeeping', 'update_task_status', id, `Tâche de ménage ${id} passée au statut "${status}"`);
+    return res.status(200).json({ success: true, task: results[0], room: results[1] });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ==========================================
+// 9. STOCK ENDPOINTS
+// ==========================================
+// Scoped to stock_items only — the only stock-related table that exists in
+// schema.sql. Suppliers, stock movements and the linen-washing workflow in
+// src/pages/Inventory.tsx remain a local simulation: wiring those would mean
+// designing new schema/tables, not connecting to something that already
+// exists (see BRUNCH_BOUAKE_PMS Changelog).
+
+router.get('/stock-items', async (req, res, next) => {
+  try {
+    const items = await db.getCollection('stock_items');
+    return res.status(200).json({ success: true, items });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/stock-items', requireRole(...STOCK_WRITE_ROLES), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { items } = req.body;
+    if (!items || !Array.isArray(items)) {
+      return res.status(400).json({ success: false, error: { message: 'Données de stock invalides.' } });
+    }
+    await db.saveCollection('stock_items', items);
+    await logActivity(req.user?.id || 1, 'stock', 'update_stock_items', null, `Mise à jour du référentiel de stock (${items.length} articles)`);
+    return res.status(200).json({ success: true, items });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ==========================================
+// 10. RESTAURANT ENDPOINTS
+// ==========================================
+// Menu items map directly onto restaurant_menu_items. Orders map onto
+// restaurant_orders for status transitions and totals, but there is no
+// order-line-items table in schema.sql, so an order's individual dish
+// breakdown remains whatever Restaurant.tsx already displays locally —
+// only the order's status/totals are real here.
+
+router.get('/restaurant/menu-items', async (req, res, next) => {
+  try {
+    const menuItems = await db.getCollection('restaurant_menu_items');
+    return res.status(200).json({ success: true, menuItems });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/restaurant/menu-items', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { name, category_id, selling_price } = req.body;
+    if (!name || !category_id || selling_price === undefined) {
+      return res.status(400).json({ success: false, error: { message: 'Nom, catégorie et prix de vente sont requis.' } });
+    }
+    const newItem = {
+      id: `menu-${Date.now()}`,
+      tax_rate: 18,
+      available: true,
+      ...req.body
+    };
+    const inserted = await db.insert('restaurant_menu_items', newItem);
+    await logActivity(req.user?.id || 1, 'restaurant', 'create_menu_item', inserted.id, `Ajout de "${inserted.name}" à la carte`);
+    return res.status(201).json({ success: true, menuItem: inserted });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/restaurant/menu-items/:id', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    const updated = await db.update('restaurant_menu_items', id, req.body);
+    if (!updated) {
+      return res.status(404).json({ success: false, error: { message: 'Article de menu introuvable.' } });
+    }
+    await logActivity(req.user?.id || 1, 'restaurant', 'update_menu_item', id, `Mise à jour de l'article de menu "${updated.name}"`);
+    return res.status(200).json({ success: true, menuItem: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/restaurant/orders', async (req, res, next) => {
+  try {
+    const orders = await db.getCollection('restaurant_orders');
+    return res.status(200).json({ success: true, orders });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/restaurant/orders/:id', requireRole(...RECEPTION_ROLES), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const allowedStatuses = ['En attente', 'En préparation', 'Servie', 'Facturée', 'Annulée'];
+    if (!status || !allowedStatuses.includes(status)) {
+      return res.status(400).json({ success: false, error: { message: 'Statut de commande invalide.' } });
+    }
+    const updated = await db.update('restaurant_orders', id, { status });
+    if (!updated) {
+      return res.status(404).json({ success: false, error: { message: 'Commande introuvable.' } });
+    }
+    await logActivity(req.user?.id || 1, 'restaurant', 'update_order_status', id, `Commande ${updated.order_number} passée au statut "${status}"`);
+    return res.status(200).json({ success: true, order: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ==========================================
+// 11. REPORTS ENDPOINTS
+// ==========================================
+// The "Timesheets & Connections" tab in Reports.tsx has no counterpart
+// here: no schema table tracks employee clock-in/clock-out sessions or
+// login/logout events, so it stays a local simulation. Only the financial
+// performance report below is computed from real data.
+
+router.get('/reports/financial-performance', async (req, res, next) => {
+  try {
+    const [reservations, rooms] = await Promise.all([
+      db.getCollection('reservations'),
+      db.getCollection('rooms')
+    ]);
+    const reports = computeMonthlyPerformance(reservations, rooms.length);
+    return res.status(200).json({ success: true, reports });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ==========================================
+// 12. HOTEL SETTINGS ENDPOINTS
 // ==========================================
 router.get('/room_categories', async (req, res, next) => {
   try {
@@ -1408,26 +1769,28 @@ router.get('/room_categories', async (req, res, next) => {
   }
 });
 
-router.put('/room_categories', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.put('/room_categories', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { categories } = req.body;
     if (!categories || !Array.isArray(categories)) {
       return res.status(400).json({ success: false, error: { message: 'Données de catégories invalides.' } });
     }
     await db.saveCollection('room_categories', categories);
+    await logActivity(req.user?.id || 1, 'rooms', 'update_room_categories', null, `Mise à jour de la grille des catégories de chambres (${categories.length} catégories)`);
     return res.status(200).json({ success: true, categories });
   } catch (err) {
     next(err);
   }
 });
 
-router.put('/settings/hotel', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.put('/settings/hotel', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const settingsList = await db.getCollection('hotel_settings');
     const existing = settingsList[0] || { id: 1 };
     const updatedData = { ...existing, ...req.body };
-    
+
     await db.saveCollection('hotel_settings', [updatedData]);
+    await logActivity(req.user?.id || 1, 'settings', 'update_hotel_settings', null, `Mise à jour des paramètres généraux de l'hôtel`);
     return res.status(200).json({ success: true, settings: updatedData });
   } catch (err) {
     next(err);
@@ -1435,11 +1798,11 @@ router.put('/settings/hotel', requireRole(...ADMIN_ROLES), async (req, res, next
 });
 
 // ==========================================
-// 9. SYSTEM MAINTENANCE ENDPOINTS (PURGE & SEED)
+// 13. SYSTEM MAINTENANCE ENDPOINTS (PURGE & SEED)
 // ==========================================
 import { getInitialSeedData, writeDB, readDB } from '../config/db';
 
-router.post('/system/purge', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.post('/system/purge', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const currentData = readDB();
     const seedBase = getInitialSeedData();
@@ -1480,10 +1843,15 @@ router.post('/system/purge', requireRole(...ADMIN_ROLES), async (req, res, next)
     }
     
     writeDB(purgedData);
-    
-    return res.status(200).json({ 
-      success: true, 
-      message: 'La base de données du serveur a été vidée avec succès.' 
+
+    // Written after the purge on purpose: audit_logs was just wiped along
+    // with everything else, so this is deliberately the first entry in the
+    // fresh log — the purge action itself must never go unrecorded.
+    await logActivity(req.user?.id || 1, 'system', 'purge_database', null, `Purge complète des données opérationnelles effectuée par l'administrateur (comptes utilisateurs conservés).`);
+
+    return res.status(200).json({
+      success: true,
+      message: 'La base de données du serveur a été vidée avec succès.'
     });
   } catch (err) {
     next(err);
@@ -1492,7 +1860,7 @@ router.post('/system/purge', requireRole(...ADMIN_ROLES), async (req, res, next)
 
 
 // ==========================================
-// 10. SYSTEM SYNCHRONIZATION ENDPOINTS
+// 14. SYSTEM SYNCHRONIZATION ENDPOINTS
 // ==========================================
 
 const nameMap: Record<string, string> = {
@@ -1544,7 +1912,7 @@ router.get('/system/sync', requireRole(...ADMIN_ROLES), async (req, res, next) =
   }
 });
 
-router.post('/system/sync', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.post('/system/sync', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { collectionName, data } = req.body;
     if (!collectionName || !Array.isArray(data)) {
@@ -1557,13 +1925,14 @@ router.post('/system/sync', requireRole(...ADMIN_ROLES), async (req, res, next) 
     }
 
     await db.saveCollection(serverCol, data);
+    await logActivity(req.user?.id || 1, 'system', 'sync_collection', null, `Synchronisation de la collection "${serverCol}" (${data.length} enregistrements) depuis le client.`);
     return res.status(200).json({ success: true });
   } catch (err) {
     next(err);
   }
 });
 
-router.post('/system/seed', requireRole(...ADMIN_ROLES), async (req, res, next) => {
+router.post('/system/seed', requireRole(...ADMIN_ROLES), async (req: AuthenticatedRequest, res, next) => {
   try {
     const seedData = getInitialSeedData();
     if (seedData.hotel_settings) {
@@ -1571,9 +1940,10 @@ router.post('/system/seed', requireRole(...ADMIN_ROLES), async (req, res, next) 
     }
     // Reset back to standard mock/seed data
     writeDB(seedData);
-    return res.status(200).json({ 
-      success: true, 
-      message: 'Les données de démonstration du serveur ont été restaurées avec succès.' 
+    await logActivity(req.user?.id || 1, 'system', 'seed_database', null, `Réinitialisation de la base de données aux données de démonstration effectuée par l'administrateur.`);
+    return res.status(200).json({
+      success: true,
+      message: 'Les données de démonstration du serveur ont été restaurées avec succès.'
     });
   } catch (err) {
     next(err);

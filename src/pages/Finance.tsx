@@ -3,43 +3,25 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Coins, Plus, Search, FileText, TrendingUp, Receipt, ArrowDownCircle, ShieldCheck, Printer, Trash2 } from 'lucide-react';
 import { PageHeader, Badge, AlertBanner, StatCard } from '../components/ui/pms-ui';
-import { mockInvoices, mockPayments, mockGuests, mockInvoiceItems, mockReservations } from '../mockData';
 import { IInvoice, IPayment, IInvoiceItem, IGuest, IReservation } from '../types';
+import { api } from '../utils/api';
 import PrintableReceipt from '../components/ui/PrintableReceipt';
 
 export default function Finance() {
-  const isPurged = localStorage.getItem('pms_db_purged') === 'true';
-  const [invoices, setInvoices] = useState<IInvoice[]>(() => {
-    const stored = localStorage.getItem('pms_invoices');
-    if (stored) {
-      try { return JSON.parse(stored); } catch (e) {}
-    }
-    return isPurged ? [] : mockInvoices;
-  });
-  const [payments, setPayments] = useState<IPayment[]>(() => {
-    const stored = localStorage.getItem('pms_payments');
-    if (stored) {
-      try { return JSON.parse(stored); } catch (e) {}
-    }
-    return isPurged ? [] : mockPayments;
-  });
-  const [guests, setGuests] = useState<IGuest[]>(() => {
-    const stored = localStorage.getItem('pms_guests');
-    if (stored) {
-      try { return JSON.parse(stored); } catch (e) {}
-    }
-    return isPurged ? [] : mockGuests;
-  });
-  const [reservations, setReservations] = useState<IReservation[]>(() => {
-    const stored = localStorage.getItem('pms_reservations');
-    if (stored) {
-      try { return JSON.parse(stored); } catch (e) {}
-    }
-    return isPurged ? [] : mockReservations;
-  });
+  // Invoices, payments, guests and reservations are the real billing data —
+  // loaded from the API. Expenses and the cash register below still have no
+  // backend of their own (no `expenses` table exists in schema.sql) and
+  // remain a local simulation; see BRUNCH_BOUAKE_PMS Changelog for context.
+  const [invoices, setInvoices] = useState<IInvoice[]>([]);
+  const [payments, setPayments] = useState<IPayment[]>([]);
+  const [guests, setGuests] = useState<IGuest[]>([]);
+  const [reservations, setReservations] = useState<IReservation[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState('');
+
   const [activeSubTab, setActiveSubTab] = useState<'invoices' | 'payments' | 'expenses' | 'caisse'>('invoices');
   const [searchQuery, setSearchQuery] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -50,13 +32,30 @@ export default function Finance() {
     return (localStorage.getItem('pms_currency') as 'XOF' | 'EUR') || 'XOF';
   });
 
-  useEffect(() => {
-    localStorage.setItem('pms_invoices', JSON.stringify(invoices));
-  }, [invoices]);
+  const loadData = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const [invoicesData, paymentsData, guestsData, reservationsData] = await Promise.all([
+        api.getInvoices(),
+        api.getPayments(),
+        api.getGuests(),
+        api.getReservations()
+      ]);
+      setInvoices(invoicesData);
+      setPayments(paymentsData);
+      setGuests(guestsData);
+      setReservations(reservationsData);
+      setErrorMsg('');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Impossible de charger les données financières.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    localStorage.setItem('pms_payments', JSON.stringify(payments));
-  }, [payments]);
+    loadData();
+  }, [loadData]);
 
   useEffect(() => {
     const handleCurrencyChange = () => {
@@ -80,7 +79,7 @@ export default function Finance() {
     if (stored) {
       try { return JSON.parse(stored); } catch (e) {}
     }
-    return isPurged ? [] : [
+    return [
       { id: 'exp-1', reference: 'DEP-2026-001', category: 'Fournitures', amount: 12500, date: '2026-07-12', user: 'Amadou' },
       { id: 'exp-2', reference: 'DEP-2026-002', category: 'Carburant', amount: 25000, date: '2026-07-11', user: 'Abdoulaye' },
     ];
@@ -116,7 +115,7 @@ export default function Finance() {
     return g ? `${g.first_name} ${g.last_name}` : 'Client externe';
   };
 
-  const registerInvoicePayment = (invId: string) => {
+  const registerInvoicePayment = async (invId: string) => {
     const inv = invoices.find(i => i.id === invId);
     if (!inv) return;
 
@@ -125,30 +124,15 @@ export default function Finance() {
       return;
     }
 
-    const payAmt = inv.balance;
-    const updatedInvoices = invoices.map(i => {
-      if (i.id === invId) {
-        return { ...i, paid: i.total, balance: 0, status: 'Payée' as const };
-      }
-      return i;
-    });
-
-    const newPayment: IPayment = {
-      id: `pay-${Date.now()}`,
-      invoice_id: invId,
-      reservation_id: inv.reservation_id,
-      payment_method: 'Espèces',
-      amount: payAmt,
-      reference: `Simulé-EPOS-${Math.floor(Math.random() * 10000)}`,
-      payment_date: new Date().toISOString().replace('T', ' ').substring(0, 16),
-      cashier_id: 'usr-admin',
-      status: 'Validé'
-    };
-
-    setInvoices(updatedInvoices);
-    setPayments([newPayment, ...payments]);
-    setSuccessMsg(`Encaissement de ${formatAmount(payAmt)} validé pour la facture ${inv.invoice_number}.`);
-    setTimeout(() => setSuccessMsg(''), 4000);
+    try {
+      const res = await api.payInvoice(invId, { payment_method: 'Espèces' });
+      setErrorMsg('');
+      setSuccessMsg(`Encaissement de ${formatAmount(res.payment.amount)} validé pour la facture ${inv.invoice_number}.`);
+      setTimeout(() => setSuccessMsg(''), 4000);
+      await loadData();
+    } catch (err: any) {
+      setErrorMsg(err.message || "Échec de l'enregistrement de l'encaissement.");
+    }
   };
 
   return (
@@ -159,8 +143,14 @@ export default function Finance() {
       />
 
       <div className="p-6 lg:p-8 space-y-6 flex-1 overflow-y-auto">
+        {errorMsg && (
+          <AlertBanner text={errorMsg} type="error" />
+        )}
         {successMsg && (
           <AlertBanner text={successMsg} type="success" />
+        )}
+        {isLoading && (
+          <AlertBanner text="Chargement des factures et règlements..." type="info" />
         )}
 
         {/* FINANCIAL SUMMARY KEY FIGURES */}

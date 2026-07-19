@@ -48,13 +48,19 @@ DEFAULT_CURRENCY=XOF
 DEFAULT_LANGUAGE=fr
 TIMEZONE=Africa/Abidjan
 
-# Configuration SMTP (Envoi d'e-mails et rapports)
+# Configuration SMTP (Envoi d'e-mails, ex : codes de réinitialisation)
 SMTP_HOST=mail.votre-domaine.com
 SMTP_PORT=465
 SMTP_USER=no-reply@votre-domaine.com
 SMTP_PASSWORD=MotDePasseSmtpSecurise
-MAIL_FROM=no-reply@votre-domaine.com
+SMTP_FROM=no-reply@votre-domaine.com
 ```
+
+> ⚠️ Sur un hébergement Node.js géré (Hostinger "Setup Node.js App"), le fichier
+> `.env` n'est utile qu'en local. En production, ces variables doivent être
+> saisies dans la section **"Environment variables"** du panneau Node.js de
+> l'hébergeur — c'est ce mécanisme qui injecte réellement les valeurs dans
+> `process.env` au démarrage de l'application.
 
 ---
 

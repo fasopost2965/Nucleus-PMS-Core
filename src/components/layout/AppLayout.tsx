@@ -643,10 +643,11 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
               }} 
               className="hidden md:flex p-1.5 rounded-md text-white/60 hover:text-white hover:bg-white/10 transition-colors"
               title={sidebarPinned ? "Désépingler la barre latérale (Mode Flottant)" : "Épingler la barre latérale (Mode Fixe)"}
+              aria-label={sidebarPinned ? "Désépingler la barre latérale" : "Épingler la barre latérale"}
             >
               <Pin size={14} className={`transition-transform duration-200 ${sidebarPinned ? 'rotate-45 text-brand-orange' : 'opacity-50'}`} />
             </button>
-            <button onClick={() => setSidebarOpen(false)} className="md:hidden p-1 rounded-md text-white/60 hover:text-white hover:bg-white/10">
+            <button onClick={() => setSidebarOpen(false)} className="md:hidden p-1 rounded-md text-white/60 hover:text-white hover:bg-white/10" aria-label="Fermer le menu">
               <X size={18} />
             </button>
           </div>
@@ -667,6 +668,8 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
                     return (
                       <div
                         key={item.path}
+                        role="link"
+                        aria-disabled="true"
                         className="flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 cursor-not-allowed opacity-40 bg-white/5 text-white/40"
                         title="Veuillez activer votre Timesheet pour accéder à ce module"
                       >
@@ -681,6 +684,7 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
                     <Link
                       key={item.path}
                       to={item.path}
+                      aria-current={isActive ? 'page' : undefined}
                       className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
                         isActive 
                           ? 'bg-brand-orange text-white font-bold shadow-lg shadow-brand-orange/20' 
@@ -709,6 +713,8 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
                     return (
                       <div
                         key={item.path}
+                        role="link"
+                        aria-disabled="true"
                         className="flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 cursor-not-allowed opacity-40 bg-white/5 text-white/40"
                         title="Veuillez activer votre Timesheet pour accéder à ce module"
                       >
@@ -723,6 +729,7 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
                     <Link
                       key={item.path}
                       to={item.path}
+                      aria-current={isActive ? 'page' : undefined}
                       className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
                         isActive 
                           ? 'bg-brand-orange text-white font-bold shadow-lg shadow-brand-orange/20' 
@@ -914,6 +921,7 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
               onClick={() => setLang(lang === 'FR' ? 'EN' : 'FR')}
               className="flex items-center space-x-1.5 text-xs text-white/80 hover:text-brand-orange px-2 py-1 rounded-md hover:bg-white/10 transition-colors"
               title="Changer de langue"
+              aria-label="Changer de langue"
             >
               <Languages size={14} />
               <span className="font-bold">{lang}</span>
@@ -921,7 +929,7 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutProps) 
 
             {/* NOTIFICATIONS DROPDOWN */}
             <div className="relative">
-              <button onClick={() => setNotifCount(0)} className="p-2 text-white/80 hover:bg-white/10 hover:text-brand-orange rounded-full relative transition-colors">
+              <button onClick={() => setNotifCount(0)} className="p-2 text-white/80 hover:bg-white/10 hover:text-brand-orange rounded-full relative transition-colors" aria-label="Notifications">
                 <Bell size={18} />
                 {notifCount > 0 && (
                   <span className="absolute top-1 right-1 w-4.5 h-4.5 bg-brand-orange text-white text-[9px] font-bold rounded-full flex items-center justify-center">
