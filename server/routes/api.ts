@@ -154,6 +154,17 @@ router.post('/auth/forgot-password', async (req, res, next) => {
     const emailResult = await sendPasswordResetEmail(user.email, resetCode, hotelName);
     if (!emailResult.sent) {
       console.warn(`[Auth] Code de réinitialisation généré pour ${user.email} mais l'email n'a pas pu être envoyé (${emailResult.reason}).`);
+      // Also recorded in audit_logs (visible from Admin > Journal d'activité)
+      // so a delivery failure can be diagnosed from inside the app — an
+      // admin shouldn't need server/SSH access just to find out why a
+      // colleague never received their reset code.
+      await logActivity(
+        user.id,
+        'auth',
+        'password_reset_email_failed',
+        String(user.id),
+        `Échec d'envoi du code de réinitialisation à ${user.email} (raison : ${emailResult.reason}). Un administrateur peut réinitialiser ce mot de passe directement depuis Admin > Utilisateurs.`
+      );
     }
 
     await logActivity(user.id, 'auth', 'request_password_reset', String(user.id), `Code de réinitialisation demandé pour ${user.email}.`);

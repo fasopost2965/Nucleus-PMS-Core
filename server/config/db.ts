@@ -68,6 +68,27 @@ if (useMySQL) {
           console.log('[Database MySQL] Ensured `must_change_password` column exists in `users`.');
         } catch (e) {}
 
+        // These two columns were introduced by the forgot/reset-password flow
+        // (server/routes/api.ts) without ever being added here. Without them,
+        // `DESCRIBE users` never lists reset_code/reset_code_expires, so
+        // saveCollection()'s dynamic column filter silently drops both
+        // fields on every MySQL sync — the code is generated and written to
+        // the local JSON fallback, but a subsequent read (which prefers
+        // MySQL when it's online) never sees it, so reset-password always
+        // reports "Code de réinitialisation invalide" regardless of what
+        // code was actually issued. This was a real, production-breaking
+        // bug on any deployment where MySQL is configured, not a config or
+        // SMTP issue.
+        try {
+          await pool!.query("ALTER TABLE `users` ADD COLUMN `reset_code` VARCHAR(10) NULL");
+          console.log('[Database MySQL] Ensured `reset_code` column exists in `users`.');
+        } catch (e) {}
+
+        try {
+          await pool!.query("ALTER TABLE `users` ADD COLUMN `reset_code_expires` DATETIME NULL");
+          console.log('[Database MySQL] Ensured `reset_code_expires` column exists in `users`.');
+        } catch (e) {}
+
         try {
           await pool!.query("ALTER TABLE `hotel_settings` ADD COLUMN `extra_config` LONGTEXT NULL");
           console.log('[Database MySQL] Ensured `extra_config` column exists in `hotel_settings`.');

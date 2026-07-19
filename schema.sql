@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS users (
     status VARCHAR(20) NOT NULL DEFAULT 'active', -- 'active', 'suspended', 'disabled'
     timezone VARCHAR(50) DEFAULT 'Africa/Abidjan',
     last_login TIMESTAMP NULL DEFAULT NULL,
+    reset_code VARCHAR(10) NULL, -- forgot-password 6-digit code, cleared on use
+    reset_code_expires DATETIME NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (role_id) REFERENCES roles(id)
