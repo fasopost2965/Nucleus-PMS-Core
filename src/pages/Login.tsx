@@ -34,9 +34,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   // Load credentials and load hotel settings dynamically on mount
   useEffect(() => {
     const rememberedEmail = localStorage.getItem('pms_remembered_email');
-    const rememberedPassword = localStorage.getItem('pms_remembered_password');
     if (rememberedEmail) setEmail(rememberedEmail);
-    if (rememberedPassword) setPassword(rememberedPassword);
 
     const loadSettings = async () => {
       try {
@@ -78,17 +76,16 @@ export default function Login({ onLoginSuccess }: LoginProps) {
     const trimmedEmail = email.trim().toLowerCase();
     const trimmedPassword = password.trim();
 
-    // Persist or clear remembered credentials
+    // Persist or clear the remembered email only — the password must never be
+    // written to localStorage in plaintext (readable via devtools by anyone
+    // with access to the machine/browser profile).
     if (rememberMe) {
       localStorage.setItem('pms_remembered_email', trimmedEmail);
-      localStorage.setItem('pms_remembered_password', trimmedPassword);
     } else {
       localStorage.removeItem('pms_remembered_email');
-      localStorage.removeItem('pms_remembered_password');
     }
 
     try {
-      // 1. First, attempt to log in using the backend API database
       const res = await api.login(trimmedEmail, trimmedPassword);
       if (res && res.success && res.user) {
         onLoginSuccess({
@@ -100,56 +97,10 @@ export default function Login({ onLoginSuccess }: LoginProps) {
         setIsLoading(false);
         return;
       }
+      setError('Adresse email ou mot de passe incorrect.');
     } catch (apiErr: any) {
       console.warn("Backend connection error or authentication failed:", apiErr);
-      // If the API server is active but explicitly rejected credentials, show that exact error.
-      if (apiErr.message && (apiErr.message.includes('incorrect') || apiErr.message.includes('invalides') || apiErr.message.includes('status 401') || apiErr.message.includes('401'))) {
-        setError(apiErr.message || 'Adresse email ou mot de passe incorrect.');
-        setIsLoading(false);
-        return;
-      }
-    }
-
-    // 2. Client-side fallback for static web hosting / offline SPA mode (LocalStorage)
-    const ALLOWED_USERS = [
-      {
-        email: 'support@brunchbouake.com',
-        password: 'Prodesk@2026',
-        name: 'Support Technique',
-        role: 'Support Technique'
-      },
-      {
-        email: 'ekonin@brunchbouake.com',
-        password: 'Prodesk@2026',
-        name: 'E. Konin',
-        role: 'Super Administrateur'
-      },
-      {
-        email: 'reservation@brunchbouake.com',
-        password: 'Prodesk@2026',
-        name: 'Service Réservations',
-        role: 'Réceptionniste'
-      },
-      {
-        email: 'fasopost24@gmail.com',
-        password: 'Prodesk@2026',
-        name: 'Amadou Koné',
-        role: 'Super Administrateur'
-      }
-    ];
-
-    const foundUser = ALLOWED_USERS.find(
-      u => u.email.toLowerCase() === trimmedEmail && u.password === trimmedPassword
-    );
-
-    if (foundUser) {
-      onLoginSuccess({
-        name: foundUser.name,
-        role: foundUser.role,
-        email: foundUser.email
-      });
-    } else {
-      setError('Adresse email ou mot de passe incorrect.');
+      setError(apiErr.message || 'Impossible de contacter le serveur. Réessayez plus tard.');
     }
     setIsLoading(false);
   };

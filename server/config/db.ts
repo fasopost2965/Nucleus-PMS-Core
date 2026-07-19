@@ -36,6 +36,33 @@ function isConnectionError(err: any): boolean {
   );
 }
 
+let lastReconnectAttempt = 0;
+const RECONNECT_COOLDOWN_MS = 15000;
+
+// Once a connection error flips `isMySQLOnline` to false, nothing ever
+// retried the connection — the process stayed on the Local JSON Fallback for
+// the rest of its lifetime (even after MySQL came back up) until someone
+// manually restarted the app or hit the /admin/db-diagnostics route, which
+// requires already being logged in. A single transient MySQL blip could
+// therefore silently and permanently strand a running deployment on JSON,
+// making any direct database fix (e.g. an admin resetting a password_hash
+// via phpMyAdmin) invisible to the app until a manual restart. This makes
+// the recovery automatic: any read/write that finds itself offline retries
+// the connection on a cooldown instead of staying down forever.
+async function ensureMySQLOnline(): Promise<void> {
+  if (!useMySQL || !pool || isMySQLOnline) return;
+  const now = Date.now();
+  if (now - lastReconnectAttempt < RECONNECT_COOLDOWN_MS) return;
+  lastReconnectAttempt = now;
+  try {
+    await pool.query('SELECT 1');
+    isMySQLOnline = true;
+    console.log('[Database MySQL] Connection recovered — switching back from Local JSON Fallback.');
+  } catch {
+    // Still down; the next call past the cooldown window will retry.
+  }
+}
+
 // Initialize MySQL Pool if config exists
 if (useMySQL) {
   try {
@@ -552,6 +579,7 @@ export type TransactionMutation =
 // General DB abstraction API
 export const db = {
   getCollection: async (name: string): Promise<any[]> => {
+    await ensureMySQLOnline();
     if (useMySQL && pool && isMySQLOnline) {
       try {
         const [rows] = await pool.query(`SELECT * FROM \`${name}\``);
@@ -605,8 +633,9 @@ export const db = {
     const data = readDB();
     data[name] = records;
     writeDB(data);
-    
+
     // Attempt sync if MySQL is active
+    await ensureMySQLOnline();
     if (useMySQL && pool && isMySQLOnline) {
       try {
         if (records.length === 0) {
@@ -735,6 +764,7 @@ export const db = {
 
     writeDB(data);
 
+    await ensureMySQLOnline();
     if (useMySQL && pool && isMySQLOnline) {
       let connection: mysql.PoolConnection | undefined;
       try {
@@ -837,6 +867,7 @@ export const db = {
   },
 
   inspectUsersSchema: async () => {
+    await ensureMySQLOnline();
     if (useMySQL && pool && isMySQLOnline) {
       try {
         const [columns]: any = await pool.query('SHOW COLUMNS FROM `users`');
@@ -903,6 +934,7 @@ export const db = {
       'settings', 'system_config', 'module_access'
     ];
 
+    await ensureMySQLOnline();
     if (useMySQL && pool && isMySQLOnline) {
       for (const table of tableNames) {
         try {
@@ -948,6 +980,7 @@ export const db = {
 
     writeDB(merged);
 
+    await ensureMySQLOnline();
     if (useMySQL && pool && isMySQLOnline) {
       for (const table of tableNames) {
         try {
